@@ -15,11 +15,11 @@ class AnalyzerConfig:
     vol_multiplier: float = 1.8
 
 
-def build_exchange(api_key: str, api_secret: str, testnet: bool) -> ccxt.binance:
+def build_exchange(api_key: str = "", api_secret: str = "", testnet: bool = False) -> ccxt.binance:
     exchange = ccxt.binance(
         {
-            "apiKey": api_key.strip(),
-            "secret": api_secret.strip(),
+            "apiKey": api_key.strip() if api_key else "",
+            "secret": api_secret.strip() if api_secret else "",
             "enableRateLimit": True,
             "options": {"defaultType": "spot"},
         }
@@ -82,10 +82,10 @@ def main():
     st.caption("Analisis de mercado por volumen, VWAP y rupturas.")
 
     with st.sidebar:
-        st.header("Conexion Binance")
+        st.header("Conexion Binance (opcional para datos)")
         api_key = st.text_input("API Key", type="password")
         api_secret = st.text_input("API Secret", type="password")
-        testnet = st.checkbox("Usar Testnet", value=True)
+        testnet = st.checkbox("Usar Testnet", value=False)
         st.divider()
         st.header("Parametros")
         symbol = st.text_input("Par", value="BTC/USDT")
@@ -103,25 +103,19 @@ def main():
     buy_clicked = c2.button("Comprar mercado")
     sell_clicked = c3.button("Vender mercado")
 
-    if auto_refresh and time.time() - st.session_state.last_refresh >= 10:
+    # Auto-refresh: trigger data reload when interval has passed
+    needs_refresh = auto_refresh and time.time() - st.session_state.last_refresh >= 10
+    if needs_refresh:
         refresh_clicked = True
-
-    if not api_key or not api_secret:
-        st.warning("Ingresa API Key y API Secret para conectar con Binance.")
-        return
-
-    try:
-        exchange = build_exchange(api_key, api_secret, testnet)
-        exchange.load_markets()
-    except Exception as err:
-        st.error(f"Error de conexion con Binance: {err}")
-        return
 
     config = AnalyzerConfig(symbol=symbol, timeframe=timeframe, limit=limit, vol_multiplier=vol_multiplier)
 
+    # Build a public exchange for market data (no API keys needed for OHLCV)
+    public_exchange = build_exchange()
+
     if refresh_clicked:
         try:
-            data = fetch_ohlcv(exchange, config.symbol, config.timeframe, config.limit)
+            data = fetch_ohlcv(public_exchange, config.symbol, config.timeframe, config.limit)
             data = add_indicators(data)
             signal = generate_signal(data, config.vol_multiplier)
             st.session_state.last_refresh = time.time()
@@ -144,14 +138,31 @@ def main():
         st.subheader("Volumen")
         st.bar_chart(data.set_index("timestamp")[["volume"]])
 
-        if buy_clicked:
-            ok, msg = create_order(exchange, symbol, "buy", order_amount)
-            st.success(msg) if ok else st.error(msg)
-        if sell_clicked:
-            ok, msg = create_order(exchange, symbol, "sell", order_amount)
-            st.success(msg) if ok else st.error(msg)
+        if buy_clicked or sell_clicked:
+            if not api_key or not api_secret:
+                st.warning("Ingresa API Key y API Secret para ejecutar ordenes.")
+            else:
+                try:
+                    auth_exchange = build_exchange(api_key, api_secret, testnet)
+                    auth_exchange.load_markets()
+                    if buy_clicked:
+                        ok, msg = create_order(auth_exchange, symbol, "buy", order_amount)
+                        st.success(msg) if ok else st.error(msg)
+                    if sell_clicked:
+                        ok, msg = create_order(auth_exchange, symbol, "sell", order_amount)
+                        st.success(msg) if ok else st.error(msg)
+                except Exception as err:
+                    st.error(f"Error de conexion con Binance: {err}")
     else:
         st.info("Pulsa 'Actualizar analisis' para cargar datos.")
+
+    # Schedule next rerun only after the remaining interval has elapsed
+    if auto_refresh and "data" in st.session_state:
+        elapsed = time.time() - st.session_state.last_refresh
+        remaining = 10 - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
+        st.rerun()
 
 
 if __name__ == "__main__":
