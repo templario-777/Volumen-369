@@ -1,6 +1,6 @@
 import time
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 import ccxt
 import pandas as pd
@@ -15,6 +15,11 @@ class AnalyzerConfig:
     vol_multiplier: float = 1.8
 
 
+def build_public_exchange() -> ccxt.binance:
+    """Exchange sin credenciales para datos publicos de mercado."""
+    return ccxt.binance({"enableRateLimit": True, "options": {"defaultType": "spot"}})
+
+
 def build_exchange(api_key: str, api_secret: str, testnet: bool) -> ccxt.binance:
     exchange = ccxt.binance(
         {
@@ -27,6 +32,26 @@ def build_exchange(api_key: str, api_secret: str, testnet: bool) -> ccxt.binance
     if testnet:
         exchange.set_sandbox_mode(True)
     return exchange
+
+
+def get_or_create_exchange(api_key: str, api_secret: str, testnet: bool) -> ccxt.binance:
+    """Devuelve el exchange cacheado en session_state, creandolo solo si cambian las credenciales."""
+    cache_key = f"{api_key}|{api_secret}|{testnet}"
+    if st.session_state.get("_exchange_cache_key") != cache_key:
+        exchange = build_exchange(api_key, api_secret, testnet)
+        exchange.load_markets()
+        st.session_state["_exchange_cache_key"] = cache_key
+        st.session_state["_exchange"] = exchange
+    return st.session_state["_exchange"]
+
+
+def get_or_create_public_exchange() -> ccxt.binance:
+    """Devuelve un exchange publico cacheado para obtener datos de mercado."""
+    if "_public_exchange" not in st.session_state:
+        exchange = build_public_exchange()
+        exchange.load_markets()
+        st.session_state["_public_exchange"] = exchange
+    return st.session_state["_public_exchange"]
 
 
 def fetch_ohlcv(exchange: ccxt.binance, symbol: str, timeframe: str, limit: int) -> pd.DataFrame:
@@ -98,30 +123,47 @@ def main():
     if "last_refresh" not in st.session_state:
         st.session_state.last_refresh = 0.0
 
-    c1, c2, c3 = st.columns([1, 1, 2])
-    refresh_clicked = c1.button("Actualizar analisis", type="primary")
-    buy_clicked = c2.button("Comprar mercado")
-    sell_clicked = c3.button("Vender mercado")
+    # Intentar conectar con credenciales si se han proporcionado.
+    # Los datos de mercado (OHLCV) son publicos y no requieren API keys.
+    private_exchange: Optional[ccxt.binance] = None
+    has_credentials = bool(api_key and api_secret)
 
-    if auto_refresh and time.time() - st.session_state.last_refresh >= 10:
-        refresh_clicked = True
+    if has_credentials:
+        try:
+            private_exchange = get_or_create_exchange(api_key, api_secret, testnet)
+            st.sidebar.success("✅ Conectado a Binance")
+        except Exception as err:
+            # Limpiar cache para que el siguiente intento vuelva a conectar
+            st.session_state.pop("_exchange_cache_key", None)
+            st.session_state.pop("_exchange", None)
+            st.sidebar.error(f"❌ Error de conexion: {err}")
+            st.error(f"No se pudo conectar con Binance: {err}")
+            return
+    else:
+        st.sidebar.info("ℹ️ Sin credenciales — solo datos publicos")
 
-    if not api_key or not api_secret:
-        st.warning("Ingresa API Key y API Secret para conectar con Binance.")
-        return
-
+    # Exchange para datos de mercado (publico si no hay credenciales, privado si las hay)
     try:
-        exchange = build_exchange(api_key, api_secret, testnet)
-        exchange.load_markets()
+        data_exchange = private_exchange if private_exchange is not None else get_or_create_public_exchange()
     except Exception as err:
-        st.error(f"Error de conexion con Binance: {err}")
+        st.session_state.pop("_public_exchange", None)
+        st.error(f"Error al inicializar conexion publica: {err}")
         return
 
     config = AnalyzerConfig(symbol=symbol, timeframe=timeframe, limit=limit, vol_multiplier=vol_multiplier)
 
+    c1, c2, c3 = st.columns([1, 1, 2])
+    refresh_clicked = c1.button("Actualizar analisis", type="primary")
+    buy_clicked = c2.button("Comprar mercado", disabled=not has_credentials)
+    sell_clicked = c3.button("Vender mercado", disabled=not has_credentials)
+
+    # Comprobar si corresponde un auto-refresh en este ciclo
+    if auto_refresh and time.time() - st.session_state.last_refresh >= 10:
+        refresh_clicked = True
+
     if refresh_clicked:
         try:
-            data = fetch_ohlcv(exchange, config.symbol, config.timeframe, config.limit)
+            data = fetch_ohlcv(data_exchange, config.symbol, config.timeframe, config.limit)
             data = add_indicators(data)
             signal = generate_signal(data, config.vol_multiplier)
             st.session_state.last_refresh = time.time()
@@ -144,14 +186,20 @@ def main():
         st.subheader("Volumen")
         st.bar_chart(data.set_index("timestamp")[["volume"]])
 
-        if buy_clicked:
-            ok, msg = create_order(exchange, symbol, "buy", order_amount)
+        if buy_clicked and private_exchange is not None:
+            ok, msg = create_order(private_exchange, symbol, "buy", order_amount)
             st.success(msg) if ok else st.error(msg)
-        if sell_clicked:
-            ok, msg = create_order(exchange, symbol, "sell", order_amount)
+        if sell_clicked and private_exchange is not None:
+            ok, msg = create_order(private_exchange, symbol, "sell", order_amount)
             st.success(msg) if ok else st.error(msg)
     else:
         st.info("Pulsa 'Actualizar analisis' para cargar datos.")
+
+    # Auto-refresh: recheck cada segundo para no bloquear la UI mas de 1 segundo.
+    # La actualizacion de datos ocurre cuando se cumplen los 10 s (linea de refresh_clicked arriba).
+    if auto_refresh:
+        time.sleep(1)
+        st.rerun()
 
 
 if __name__ == "__main__":
