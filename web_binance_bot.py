@@ -195,11 +195,10 @@ def main():
     else:
         st.info("Pulsa 'Actualizar analisis' para cargar datos.")
 
-    # Auto-refresh: esperar el tiempo restante y forzar un nuevo ciclo de Streamlit
+    # Auto-refresh: recheck cada segundo para no bloquear la UI mas de 1 segundo.
+    # La actualizacion de datos ocurre cuando se cumplen los 10 s (linea de refresh_clicked arriba).
     if auto_refresh:
-        elapsed = time.time() - st.session_state.last_refresh
-        wait = max(0.0, 10.0 - elapsed)
-        time.sleep(wait)
+        time.sleep(1)
         st.rerun()
 
 
