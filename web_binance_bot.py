@@ -103,8 +103,9 @@ def main():
     buy_clicked = c2.button("Comprar mercado")
     sell_clicked = c3.button("Vender mercado")
 
-    # Auto-refresh: trigger rerun when interval has passed
-    if auto_refresh and time.time() - st.session_state.last_refresh >= 10:
+    # Auto-refresh: trigger data reload when interval has passed
+    needs_refresh = auto_refresh and time.time() - st.session_state.last_refresh >= 10
+    if needs_refresh:
         refresh_clicked = True
 
     config = AnalyzerConfig(symbol=symbol, timeframe=timeframe, limit=limit, vol_multiplier=vol_multiplier)
@@ -155,9 +156,12 @@ def main():
     else:
         st.info("Pulsa 'Actualizar analisis' para cargar datos.")
 
-    # Schedule next rerun for auto-refresh
-    if auto_refresh:
-        time.sleep(max(0, 10 - (time.time() - st.session_state.last_refresh)))
+    # Schedule next rerun only after the remaining interval has elapsed
+    if auto_refresh and "data" in st.session_state:
+        elapsed = time.time() - st.session_state.last_refresh
+        remaining = 10 - elapsed
+        if remaining > 0:
+            time.sleep(remaining)
         st.rerun()
 
 
