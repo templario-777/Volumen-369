@@ -153,6 +153,10 @@ def main():
     else:
         st.info("Pulsa 'Actualizar analisis' para cargar datos.")
 
+    if auto_refresh:
+        time.sleep(10)
+        st.rerun()
+
 
 if __name__ == "__main__":
     main()
