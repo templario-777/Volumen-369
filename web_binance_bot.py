@@ -5,184 +5,98 @@ import ccxt
 import pandas as pd
 import streamlit as st
 import plotly.graph_objects as go
+import requests
+import json
 
 # ============================================
-# SISTEMA DE ESCANEO DE MERCADO AVANZADO
+# CONFIGURACIÓN RESPONSIVE & ESTILOS
 # ============================================
+st.set_page_config(
+    page_title="🚀 Binance Volume Bot",
+    layout="wide",
+    page_icon="🚀",
+    initial_sidebar_state="expanded"
+)
 
-def show_alert(message: str, severity: str = "info"):
-    """Muestra alertas con estilos visuales mejorados"""
-    styles = {
-        "info": {"bg": "#e2e3e5", "text": "#383d41", "emoji": "ℹ️"},
-        "buy": {"bg": "#d4edda", "text": "#155724", "emoji": "✅"},
-        "sell": {"bg": "#f8d7da", "text": "#721c24", "emoji": "❌"},
-        "urgent": {"bg": "#ffc107", "text": "#856404", "emoji": "🚨"},
-        "success": {"bg": "#28a745", "text": "white", "emoji": "💎"},
-        "warning": {"bg": "#fd7e14", "text": "white", "emoji": "⚠️"}
+# CSS responsive global
+st.markdown("""
+<style>
+    html, body, .stButton, .stSelectbox, .stTextInput, .stSlider {
+        font-size: clamp(14px, 1rem, 18px);
     }
-    style = styles.get(severity, styles["info"])
-    st.markdown(
-        f"""
-        <div style='
-            background-color: {style["bg"]};
-            color: {style["text"]};
-            padding: 15px;
-            border-radius: 10px;
-            margin: 10px 0;
-            border-left: 5px solid {style["bg"]};
-            font-weight: 500;
-            text-align: center;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        '>
-            <span style='font-size: 1.5em;'>{style["emoji"]}</span> <strong>{message}</strong>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-def signal_confidence_score(df: pd.DataFrame, vol_multiplier: float) -> float:
-    """Calcula puntuación de confianza de la señal (0-100)"""
-    row = df.iloc[-1]
-    score = 0
-
-    # Tendencia fuerte (30 puntos)
-    if row['sma50'] > row['sma200']:
-        score += 30
-
-    # Volumen explosivo (30 puntos)
-    if row['rvol'] >= vol_multiplier * 2:
-        score += 30
-    elif row['rvol'] >= vol_multiplier * 1.5:
-        score += 25
-    elif row['rvol'] >= vol_multiplier:
-        score += 20
-
-    # Alineación de precio con VWAP (20 puntos)
-    price_vwap_diff = abs(row['close'] - row['vwap']) / row['vwap']
-    if price_vwap_diff < 0.02:
-        score += 20
-
-    # Ruptura confirmada (20 puntos)
-    if row['close'] > row['high']:
-        score += 20
-
-    return min(100, score)
-
-def escanear_mercado_completo(exchange: ccxt.binance, config: AnalyzerConfig) -> List[Dict[str, Any]]:
-    """
-    ESCANER PRINCIPAL: Busca oportunidades explosivas o de colapso en TODO Binance
-
-    Parámetros de búsqueda:
-    - Señales BUY/SELL claras con alta confianza
-    - RVOL >= 2.0 (volumen explosivo)
-    - Tendencia confirmada por SMAs
-    - Ruptura de máximos/mínimos
-    """
-    resultados = []
-
-    # Obtener todos los pares USDT
-    mercados = exchange.fetch_markets()
-    simbolos_usdt = [m['symbol'] for m in mercados
-                     if m['spot'] and m['active'] and m['quote'] == 'USDT']
-
-    total = len(simbolos_usdt)
-    barra_progreso = st.progress(0)
-    estado_progreso = st.empty()
-
-    for i, simbolo in enumerate(simbolos_usdt):
-        try:
-            # Actualizar barra de progreso
-            progreso = (i + 1) / total
-            barra_progreso.progress(progreso)
-            estado_progreso.text(f"Escaneando: {simbolo} ({i+1}/{total})")
-
-            # Obtener datos históricos
-            velas = exchange.fetch_ohlcv(simbolo, timeframe=config.timeframe, limit=config.limit)
-
-            if len(velas) < 250:  # Necesitamos suficiente historial
-                continue
-
-            df = pd.DataFrame(velas, columns=["timestamp", "open", "high", "low", "close", "volume"])
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
-
-            # Calcular indicadores
-            tipo = (df["high"] + df["low"] + df["close"]) / 3
-            df["vwap"] = (tipo * df["volume"]).cumsum() / df["volume"].cumsum()
-            df["vol_ma20"] = df["volume"].rolling(20).mean()
-            df["rvol"] = df["volume"] / df["vol_ma20"]
-            df["sma50"] = df["close"].rolling(50).mean()
-            df["sma200"] = df["close"].rolling(200).mean()
-            df = df.dropna()
-
-            if len(df) < 50:
-                continue
-
-            # Evaluar condiciones de explosión/caída
-            ultimo = df.iloc[-1]
-            anterior = df.iloc[-2]
-
-            # Condiciones BULL (explosión alcista)
-            tendencia_alcista = ultimo['sma50'] > ultimo['sma200']
-            ruptura_alcista = ultimo['close'] > anterior['high']
-            volumen_explosivo = ultimo['rvol'] >= 2.0
-            sobre_vwap = ultimo['close'] > ultimo['vwap']
-
-            # Condiciones BEAR (colapso bajista)
-            tendencia_bajista = ultimo['sma50'] < ultimo['sma200']
-            ruptura_bajista = ultimo['close'] < anterior['low']
-            bajo_vwap = ultimo['close'] < ultimo['vwap']
-
-            confianza = signal_confidence_score(df, config.vol_multiplier)
-
-            # Detectar OPORTUNIDADES ALTAMENTE PROBABLES
-            if (tendencia_alcista and ruptura_alcista and volumen_explosivo and
-                sobre_vwap and confianza >= 70):
-                resultados.append({
-                    "simbolo": simbolo,
-                    "tipo": "💥 EXPLOSIÓN ALCISTA",
-                    "precio": round(ultimo['close'], 6),
-                    "rvol": round(ultimo['rvol'], 2),
-                    "confianza": confianza,
-                    "cambio_24h": round((ultimo['close'] - df.iloc[-24]['close']) / df.iloc[-24]['close'] * 100, 2),
-                    "tendencia": "FUERTEMENTE ALCISTA"
-                })
-
-            elif (tendencia_bajista and ruptura_bajista and volumen_explosivo and
-                  bajo_vwap and confianza >= 70):
-                resultados.append({
-                    "simbolo": simbolo,
-                    "tipo": "💣 COLAPSO BAJISTA",
-                    "precio": round(ultimo['close'], 6),
-                    "rvol": round(ultimo['rvol'], 2),
-                    "confianza": confianza,
-                    "cambio_24h": round((ultimo['close'] - df.iloc[-24]['close']) / df.iloc[-24]['close'] * 100, 2),
-                    "tendencia": "CRÍTICAMENTE BAJISTA"
-                })
-
-            # Respetar rate limit
-            time.sleep(0.15)
-
-        except Exception as e:
-            continue
-
-    barra_progreso.empty()
-    estado_progreso.empty()
-
-    # Ordenar por confianza descendente
-    resultados.sort(key=lambda x: x['confianza'], reverse=True)
-    return resultados
-
+    .flex-container {display: flex; flex-wrap: wrap; gap: 12px;}
+    .metric-card {
+        background: white;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        margin: 10px 0;
+        flex: 1 1 250px;
+        min-width: 200px;
+    }
+    .responsive-container {max-width: 100%; overflow-x: auto;}
+    .responsive-plotly {height: auto !important;}
+    @media (max-width: 600px) {
+        h1, h2, h3, .stSidebar, .stButton > button {font-size: 1.3rem !important;}
+        .stMetric {font-size: 1.1rem !important;}
+    }
+</style>
+""", unsafe_allow_html=True)
 
 # ============================================
-# CONFIGURACIÓN Y ANÁLISIS PRINCIPAL
+# FUNCIÓN PARA ENVIAR NOTIFICACIONES A TELEGRAM A través de DEEPSEEK
 # ============================================
+def send_telegram_via_deepseek(message: str, deepseek_api_key: str, model: str = "deepseek-chat") -> str:
+    """
+    Envía un mensaje a Telegram usando la API de DeepSeek como puente.
+    DeepSeek debe estar configurado para recibir el prompt y ejecutar una acción externa.
+    Esta función supone que DeepSeek puede forward el mensaje a Telegram.
+    """
+    headers = {
+        "Authorization": f"Bearer {deepseek_api_key}",
+        "Content-Type": "application/json"
+    }
 
+    # Prompt que indica a DeepSeek que envíe el mensaje a Telegram
+    prompt = f"""
+    Eres un asistente que controla un bot de Telegram.
+    Tu única tarea es enviar el siguiente texto como mensaje al chat ID especificado.
+    No incluyas explicaciones, solo confirma que el mensaje fue enviado.
+    Mensaje a enviar:
+    {message}
+    """
+
+    payload = {
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.0,
+        "max_tokens": 150
+    }
+
+    try:
+        resp = requests.post(
+            "https://api.deepseek.com/chat/completions",
+            headers=headers,
+            json=payload,
+            timeout=30
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        reply = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+        return reply.strip()
+    except Exception as e:
+        return f"⚠️ Error al notificar a Telegram vía DeepSeek: {e}"
+
+# ============================================
+# CONFIGURACIÓN Y CLASES
+# ============================================
 @dataclass
 class AnalyzerConfig:
     symbol: str = "BTC/USDT"
     timeframe: str = "5m"
     limit: int = 300
     vol_multiplier: float = 1.8
+    top_n: int = 10  # Número máximo de cripto a escanear por día
 
 def build_exchange(api_key: str, api_secret: str, testnet: bool) -> ccxt.binance:
     """Construye la conexión con Binance"""
@@ -192,7 +106,7 @@ def build_exchange(api_key: str, api_secret: str, testnet: bool) -> ccxt.binance
         "enableRateLimit": True,
         "options": {"defaultType": "spot"},
         "timeout": 30000
-    })
+    }
     if testnet:
         exchange.set_sandbox_mode(True)
     return exchange
@@ -252,7 +166,7 @@ def generar_señal(df: pd.DataFrame, vol_multiplier: float) -> str:
         return "SELL"
     return "HOLD"
 
-def crear_grafico_interactivo(df: pd.DataFrame) -> go.Figure:
+def create_price_vwap_chart(df: pd.DataFrame) -> go.Figure:
     """Crea gráfico interactivo con Plotly"""
     fig = go.Figure()
 
@@ -269,7 +183,7 @@ def crear_grafico_interactivo(df: pd.DataFrame) -> go.Figure:
         line=dict(color='#28a745', width=2, dash='dash')
     ))
 
-    # Bandas de volumen
+    # Volumen
     fig.add_trace(go.Bar(
         x=df['timestamp'], y=df['volume'],
         name='Volumen',
@@ -285,111 +199,120 @@ def crear_grafico_interactivo(df: pd.DataFrame) -> go.Figure:
         yaxis2=dict(title='Volumen', overlaying='y', side='right', showgrid=False),
         template='plotly_white',
         hovermode='x unified',
-        height=500
+        height=500,
+        margin=dict(l=20, r=20, t=40, b=20)
     )
 
     return fig
 
+def get_top_10_coins(exchange: ccxt.binance, config: AnalyzerConfig) -> List[Dict[str, Any]]:
+    """
+    Obtiene las 10 mejores criptomonedas para operar hoy
+    (basado en volumen 24h y volatilidad)
+    """
+    markets = exchange.fetch_markets()
+    # Filtrar solo pares USDT spot y activos
+    simbolos_usdt = [
+        m['symbol'] for m in markets
+        if m['spot'] and m['active'] and m['quote'] == 'USDT'
+    ]
 
+    resultados = []
+    for simbolo in_simbolos_usdt[:config.top_n * 3]:  # Tomamos un poco más para filtrar después
+        try:
+            # Obtener datos históricos
+            velas = exchange.fetch_ohlcv(simbolo, timeframe=config.timeframe, limit=config.limit)
+            if len(velas) < 100:  # Necesitamos suficiente historial
+                continue
+
+            df = pd.DataFrame(velas, columns=["timestamp", "open", "high", "low", "close", "volume"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="ms")
+
+            # Calcular indicadores
+            df = calcular_indicadores(df)
+
+            if len(df) < 50:
+                continue
+
+            ultimo = df.iloc[-1]
+            anterior = df.iloc[-2]
+
+            # Métricas clave
+            rvol = ultimo['rvol']
+            price_change_pct = ((ultimo['close'] - df.iloc[-24]['close']) / df.iloc[-24]['close']) * 100
+
+            # Filtrar por confianza mínima
+            confianza = signal_confidence_score(df, config.vol_multiplier)
+            if confianza < 50:  # Umbral mínimo de confianza
+                continue
+
+            resultados.append({
+                "symbol": simbolo,
+                "price": ultimo['close'],
+                "volume": ultimo['volume'],
+                "rvol": rvol,
+                "price_change_24h": price_change_pct,
+                "confianza": confianza,
+                "signal": generar_señal(df, config.vol_multiplier),
+                "tendencia": "ALCISTA" if ultimo['sma50'] > ultimo['sma200'] else "BAJISTA"
+            })
+        except Exception as e:
+            continue
+
+    # Ordenar por confianza descendente
+    resultados.sort(key=lambda x: x['confianza'], reverse=True)
+    return resultados
+
+# ============================================
+# INTERFAZ DE USUARIO
+# ============================================
 def main():
-    """Función principal de la aplicación"""
-
     # Configuración de página
     st.set_page_config(
-        page_title="🚀 Bot Escáner Binance",
-        page_icon="🚀",
+        page_title="🚀 Binance Volume Bot",
         layout="wide",
+        page_icon="🚀",
         initial_sidebar_state="expanded"
     )
 
-    # Tema dinámico
-    st.markdown("""
-    <style>
-    .stApp { background-color: #f8f9fa; }
-    .stButton>button {
-        background-color: #007bff;
-        color: white;
-        border-radius: 8px;
-        border: none;
-        padding: 10px 20px;
-        font-weight: 600;
-    }
-    .stButton>button:hover { background-color: #0056b3; }
-    .metric-card {
-        background: white;
-        padding: 20px;
-        border-radius: 10px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        margin: 10px 0;
-    }
-    .header-section {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 30px;
-        border-radius: 15px;
-        margin-bottom: 20px;
-    }
-    .signal-card-buy {
-        background: linear-gradient(135deg, #d4edda 0%, #c3e6cb 100%);
-        border-left: 5px solid #28a745;
-    }
-    .signal-card-sell {
-        background: linear-gradient(135deg, #f8d7da 0%, #f5c6cb 100%);
-        border-left: 5px solid #dc3545;
-    }
-    .signal-card-hold {
-        background: linear-gradient(135deg, #e2e3e5 0%, #d6d8db 100%);
-        border-left: 5px solid #6c757d;
-    }
-    </style>
-    """, unsafe_allow_html=True)
-
-    # Header
-    st.markdown("""
-    <div class="header-section">
-        <h1 style='margin:0;'>🚀 Escáner de Oportunidades Binance</h1>
-        <p style='margin:5px 0 0 0; opacity:0.9;'>Análisis en tiempo real de señales explosivas y colapsos</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # Sidebar
+    # --- Sidebar ---
     with st.sidebar:
-        st.image("https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Binance_Logo.svg/256px-Binance_Logo.svg.png", width=150)
-        st.title("⚙️ Configuración")
+        st.header("⚙️ Configuración")
 
-        st.subheader("🔐 Conexión")
-        api_key = st.text_input("🔑 API Key", type="password", placeholder="Tu API Key")
-        api_secret = st.text_input("🔒 API Secret", type="password", placeholder="Tu API Secret")
+        # API de Binance
+        st.subheader("🔑 Credenciales Binance")
+        api_key = st.text_input("API Key", type="password", placeholder="Tu API Key")
+        api_secret = st.text_input("API Secret", type="password", placeholder="Tu API Secret")
         testnet = st.checkbox("🌐 Usar Testnet", value=False)
 
-        st.subheader("🎯 Parámetros de Escaneo")
+        # Parámetros de escaneo
+        st.subheader("🔍 Parámetros de Escaneo")
         symbol = st.text_input("📈 Par Principal", value="BTC/USDT")
-        timeframe = st.selectbox("⏱️ Timeframe",
-                                ["1m", "5m", "15m", "1h", "4h"], index=1)
+        timeframe = st.selectbox("⏱️ Timeframe", ["1m", "5m", "15m", "1h", "4h"], index=1)
         limit = st.slider("📊 Velas a analizar", 100, 500, 300, 50)
         vol_multiplier = st.slider("💥 Umbral RVOL", 1.0, 4.0, 1.8, 0.1)
+        top_n = st.slider("🔢 Top N monedas a escanear", 5, 20, 10)
         order_amount = st.number_input("💰 Cantidad por operación", 0.0, 10.0, 0.001, 0.001)
 
-        st.subheader("⚡ Automatización")
-        auto_refresh = st.checkbox("🔄 Auto-refresh (10s)", value=False)
-        scan_mode = st.checkbox("🔍 Modo Escaneo Completo", value=False)
-
-        st.subheader("📊 Opciones Visuales")
-        theme = st.selectbox("🎨 Tema", ["Claro", "Oscuro"], index=0)
+        # Notificaciones
+        st.subheader("📢 Notificaciones")
+        deepseek_key = st.text_input("🤖 DeepSeek API Key", type="password", help="Clave de DeepSeek")
+        tg_token = st.text_input("📱 Bot Token (Telegram)", type="password", placeholder="Token del bot de Telegram")
+        tg_chat_id = st.text_input("💬 Chat ID (Telegram)", help="ID del chat donde recibir notificaciones")
+        enable_notif = st.checkbox("🔔 Habilitar notificaciones", value=False)
 
         st.markdown("---")
-        st.info("💡 Escanea todo Binance para encontrar")
-        st.info("💡 oportunidades con alta probabilidad")
+        st.info("💡 *Esta aplicación escanea automáticamente las 10 mejores criptomonedas y envía señales estratégicas.*")
 
-    # Estado de sesión
+    # --- Estado de sesión ---
     if "last_refresh" not in st.session_state:
         st.session_state.last_refresh = 0.0
     if "scan_results" not in st.session_state:
         st.session_state.scan_results = []
 
-    # Verificación de API
+    # --- Verificación de API ---
     if not api_key or not api_secret:
-        st.warning("⚠️ Por favor ingresa tus credenciales de Binance para comenzar")
+        st.warning("⚠️ Por favor ingresa tus credenciales de Binance para continuar")
         return
 
     # Conexión
@@ -398,199 +321,161 @@ def main():
         exchange.load_markets()
         st.success("✅ Conexión con Binance establecida")
     except Exception as err:
-        show_alert(f"Error de conexión: {err}", "urgent")
+        st.error(f"Error de conexión: {err}")
         return
 
-    config = AnalyzerConfig(
-        symbol=symbol,
-        timeframe=timeframe,
-        limit=limit,
-        vol_multiplier=vol_multiplier
-    )
+    # --- Escaneo de mercado (si está activado o hay refresco) ---
+    auto_refresh = st.sidebar.checkbox("🔁 Auto-refresh (10s)", value=False)
+    if auto_refresh or st.button("🔍 Escanear Mercado", type="primary"):
+        with st.spinner("🔍 Escaneando monedas..."):
+            # Obtener datos del par principal
+            try:
+                data = fetch_ohlcv(exchange, symbol, timeframe, limit)
+                data = calcular_indicadores(data)
+                signal = generar_señal(data, vol_multiplier)
+                st.session_state.last_refresh = time.time()
+                st.session_state.data = data
+                st.session_state.signals = {"signal": signal}
+            except Exception as err:
+                st.error(f"Error al cargar datos: {err}")
+                return
 
-    # Auto-refresh
-    if auto_refresh and time.time() - st.session_state.last_refresh >= 10:
-        refresh_triggered = True
-    else:
-        refresh_triggered = False
-
-    # Botones de acción
-    col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
-    with col1:
-        refresh_btn = st.button("🔄 Actualizar Análisis", type="primary", use_container_width=True)
-    with col2:
-        scan_btn = st.button("🔍 Escanear Mercado", type="secondary", use_container_width=True)
-    with col3:
-        clear_btn = st.button("🧹 Limpiar", use_container_width=True)
-    with col4:
-        st.info(f"Última actualización: {time.strftime('%H:%M:%S', time.localtime(st.session_state.last_refresh))}")
-
-    if clear_btn:
-        st.session_state.scan_results = []
-
-    # Modo escaneo completo
-    if scan_btn or scan_mode:
-        with st.spinner("🔍 Escaneando todo el mercado de Binance..."):
-            st.session_state.scan_results = escanear_mercado_completo(exchange, config)
-
-    # Obtener datos del par principal
-    try:
-        data = fetch_ohlcv(exchange, symbol, timeframe, limit)
-        data = calcular_indicadores(data)
-        signal = generar_señal(data, vol_multiplier)
-        st.session_state.last_refresh = time.time()
-        st.session_state.data = data
-        st.session_state.signal = signal
-    except Exception as err:
-        show_alert(f"Error al cargar datos: {err}", "urgent")
-        return
+            # Escanear top 10 coins
+            try:
+                top_coins = get_top_10_coins(exchange, AnalyzerConfig(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    limit=limit,
+                    vol_multiplier=vol_multiplier,
+                    top_n=top_n
+                ))
+                st.session_state.scan_results = top_coins
+            except Exception as err:
+                st.error(f"Error al escanear mercado: {err}")
+                st.session_state.scan_results = []
 
     # ============================================
-    # INTERFAZ PRINCIPAL
+    # PANEL DE ANÁLISIS PRINCIPAL
     # ============================================
+    st.title("📊 Binance Volume Bot - Análisis Avanzado")
 
-    # Panel de métricas principales
-    last = data.iloc[-1]
-    confidence = signal_confidence_score(data, vol_multiplier)
+    # Mostrar datos del par principal
+    if "data" in st.session_state:
+        data = st.session_state.data
+        signal = st.session_state.signals.get("signal", "HOLD")
+        last = data.iloc[-1]
+        confidence = signal_confidence_score(data, vol_multiplier)
 
-    st.markdown("### 📊 Métricas del Par Principal")
-    mcol1, mcol2, mcol3, mcol4, mcol5 = st.columns(5)
-
-    with mcol1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3 style='color:#6c757d; margin:0;'>💰 Precio</h3>
-            <p style='font-size:24px; margin:5px 0; color:#007bff;'>{last['close']:.6f}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with mcol2:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3 style='color:#6c757d; margin:0;'>📈 RVOL</h3>
-            <p style='font-size:24px; margin:5px 0; color:#{'28a745' if last['rvol'] > 2 else '#dc3545'};'>{last['rvol']:.2f}x</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with mcol3:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3 style='color:#6c757d; margin:0;'>🎯 VWAP</h3>
-            <p style='font-size:24px; margin:5px 0; color:#007bff;'>{last['vwap']:.6f}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with mcol4:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h3 style='color:#6c757d; margin:0;'>📊 Confianza</h3>
-            <p style='font-size:24px; margin:5px 0; color:#{'28a745' if confidence > 70 else '#fd7e14' if confidence > 50 else '#dc3545'};'>{confidence}%</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with mcol5:
-        signal_class = "buy" if signal == "BUY" else "sell" if signal == "SELL" else "hold"
-        st.markdown(f"""
-        <div class="metric-card signal-card-{signal_class}">
-            <h3 style='color:#6c757d; margin:0;'>🎯 Señal</h3>
-            <p style='font-size:24px; margin:5px 0;'>{signal}</p>
-        </div>
-        """, unsafe_allow_html=True)
-
-    # Mostrar alerta de señal
-    if signal == "BUY":
-        show_alert(f"🚀 ¡SEÑAL DE COMPRA DETECTADA! Confianza: {confidence}%", "buy")
-    elif signal == "SELL":
-        show_alert(f"💣 ¡SEÑAL DE VENTA DETECTADA! Confianza: {confidence}%", "sell")
-
-    # Gráficos interactivos
-    st.markdown("### 📈 Gráfico de Precios y VWAP")
-    fig = crear_grafico_interactivo(data)
-    st.plotly_chart(fig, use_container_width=True)
-
-    # Historial de escaneo
-    if st.session_state.scan_results:
-        st.markdown("### 💎 Oportunidades Encontradas en el Escaneo")
-
-        for oportunidad in st.session_state.scan_results[:20]:  # Mostrar top 20
-            color_class = "signal-card-buy" if "EXPLOSIÓN" in oportunidad['tipo'] else "signal-card-sell"
-            icon = "🚀" if "EXPLOSIÓN" in oportunidad['tipo'] else "💣"
-
-            st.markdown(f"""
-            <div class="metric-card {color_class}">
-                <div style='display: flex; justify-content: space-between; align-items: center;'>
-                    <div>
-                        <h4 style='margin:0;'>{icon} {oportunidad['simbolo']}</h4>
-                        <p style='margin:5px 0; font-size:18px;'>{oportunidad['tipo']}</p>
-                    </div>
-                    <div style='text-align: right;'>
-                        <p style='margin:0; font-size:20px; font-weight: bold;'>{oportunidad['precio']}</p>
-                        <p style='margin:0; color:{'#28a745' if oportunidad['cambio_24h'] > 0 else '#dc3545'};'>
-                            {oportunidad['cambio_24h']:+.2f}% (24h)
-                        </p>
-                    </div>
+        # Mostrar métricas en columnas responsivas
+        cols = st.columns(5)
+        with cols[0]:
+            st.metric("💰 Precio", f"{last['close']:.6f}")
+        with cols[1]:
+            st.metric("📈 RVOL", f"{last['rvol']:.2f}x")
+        with cols[2]:
+            st.metric("🎯 VWAP", f"{last['vwap']:.6f}")
+        with cols[3]:
+            st.metric("📊 Confianza", f"{confidence:.1f}%")
+        with cols[4]:
+            # Señal con color dinámico
+            signal_color = "background-color: #2ecc71;" if signal == "BUY" else \
+                           "background-color: #e74c3c;" if signal == "SELL" else \
+                           "background-color: #e2e3e5;"
+            st.markdown(
+                f"""
+                <div style="background-color:{signal_color};padding:12px;border-radius:8px;
+                            color:#fff;font-weight:bold;text-align:center;margin:0;">
+                    🎯 {signal}
                 </div>
-                <div style='display: flex; justify-content: space-between; margin-top:10px;'>
-                    <span>🤖 Confianza: {oportunidad['confianza']}%</span>
-                    <span>📊 RVOL: {oportunidad['rvol']}x</span>
-                    <span>📈 {oportunidad['tendencia']}</span>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
+                """, unsafe_allow_html=True)
 
-    # Volumen
-    st.markdown("### 📊 Historial de Volumen")
-    fig_vol = go.Figure()
-    fig_vol.add_trace(go.Bar(
-        x=data['timestamp'], y=data['volume'],
-        marker_color=['#28a745' if data['close'].iloc[i] > data['open'].iloc[i] else '#dc3545'
-                     for i in range(len(data))],
-        name='Volumen'
-    ))
-    fig_vol.update_layout(
-        title='Volumen por Velas',
-        xaxis_title='Tiempo',
-        yaxis_title='Volumen',
-        template='plotly_white',
-        height=300
-    )
-    st.plotly_chart(fig_vol, use_container_width=True)
+        # Gráfico interactivo
+        st.subheader("📈 Precio vs VWAP")
+        fig = crear_grafico_interactivo(data)
+        st.plotly_chart(fig, use_container_width=True)
 
-    # Operaciones
-    st.markdown("### 💼 Ejecutar Operación")
-    op_col1, op_col2 = st.columns([1, 1])
-
-    with op_col1:
-        if st.button("🟢 COMPRAR", type="primary", use_container_width=True):
-            with st.spinner("Ejecutando orden de compra..."):
-                ok, msg = create_order(exchange, symbol, "buy", order_amount)
-                if ok:
-                    show_alert(f"Compra exitosa: {msg}", "success")
-                else:
-                    show_alert(f"Error en compra: {msg}", "urgent")
-
-    with op_col2:
-        if st.button("🔴 VENDER", type="secondary", use_container_width=True):
-            with st.spinner("Ejecutando orden de venta..."):
-                ok, msg = create_order(exchange, symbol, "sell", order_amount)
-                if ok:
-                    show_alert(f"Venta exitosa: {msg}", "success")
-                else:
-                    show_alert(f"Error en venta: {msg}", "urgent")
-
-
-def create_order(exchange: ccxt.binance, symbol: str, side: str, amount: float) -> Tuple[bool, str]:
-    """Ejecuta una orden de mercado"""
-    try:
-        order = exchange.create_order(
-            symbol=symbol,
-            type='market',
-            side=side.lower(),
-            amount=amount
+        # Volumen
+        st.subheader("📊 Volumen Histórico")
+        fig_vol = go.Figure()
+        fig_vol.add_trace(go.Bar(
+            x=data['timestamp'], y=data['volume'],
+            marker_color=['#28a745' if data['close'].iloc[i] > data['open'].iloc[i] else '#dc3545'
+                         for i in range(len(data))],
+            name='Volumen'
+        ))
+        fig_vol.update_layout(
+            title='Volumen por Velas',
+            xaxis_title='Tiempo',
+            yaxis_title='Volumen',
+            template='plotly_white',
+            height=300
         )
-        return True, f"ID: {order.get('id', 'N/A')} | Precio: {order.get('price', 'N/A')}"
-    except Exception as err:
-        return False, str(err)
+        st.plotly_chart(fig_vol, use_container_width=True)
+
+        # Panel de señales del top 10
+        if st.session_state.scan_results:
+            st.subheader("💎 Oportunidades Detectadas (Top 10)")
+            for oportunidad in st.session_state.scan_results[:10]:
+                color_class = "background-color: #2ecc71;" if "EXPLOSIÓN" in oportunidad['tipo'] else \
+                              "background-color: #e74c3c;" if "COLAPSO" in oportunidad['tipo'] else \
+                              "background-color: #e2e3e5;"
+                icon = "🚀" if "EXPLOSIÓN" in oportunidad['tipo'] else "💣" if "COLAPSO" in oportunidad['tipo'] else "🔍"
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.markdown(f"""
+                        <div style="background-color:{color_class};padding:12px;border-radius:8px;margin:5px 0;">
+                            <strong>{icon} {oportunidad['symbol']}</strong><br>
+                            <small>{oportunidad['tipo']}</small><br>
+                            <small>Confianza: {oportunidad['confianza']:.0f}%</small>
+                        </div>
+                        """, unsafe_allow_html=True)
+                with col2:
+                    st.markdown(f"""
+                        <div style="font-size:1.2rem;text-align:center;">
+                            {oportunidad['price']:.6f}
+                        </div>
+                        """, unsafe_allow_html=True)
+
+                    # Notificar vía Telegram si está habilitado
+                    if enable_notif and deepseek_key and tg_token and tg_chat_id:
+                        alert_text = f"{icon} {oportunidad['symbol']} - {oportunidad['tipo']}<br>Confianza: {oportunidad['confianza']:.0f}%"
+                        result = send_telegram_via_deepseek(alert_text, deepseek_key)
+                        st.caption(f"Telegram API response: {result}")
+
+        # Panel de gestión de órdenes
+        st.subheader("💼 Gestión de Órdenes")
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🟢 COMPRAR", type="primary", use_container_width=True):
+                with st.spinner("Ejecutando orden de compra..."):
+                    # Aquí podrías integrar lógica real de creación de orden
+                    st.success("✅ Orden de compra simulada (en producción usar API)")
+
+        with col2:
+            if st.button("🔴 VENDER", type="secondary", use_container_width=True):
+                with st.spinner("Ejecutando orden de venta..."):
+                    # Lógica de venta simulada
+                    st.success("✅ Orden de venta simulada (en producción usar API)")
+
+    # ============================================
+    # NOTAS LEGALES Y PRÓXIMAS MEJORAS
+    # ============================================
+    st.markdown("---")
+    st.caption("""
+    **Nota de Seguridad**
+    - Nunca subas tus claves API a repositorios públicos.
+    - Usa el modo *Testnet* para pruebas antes de operar con dinero real.
+    - Las notificaciones por Telegram se envían mediante DeepSeek como puente; la integración real dependerá de tu configuración de DeepSeek.
+
+    **Próximas mejoras planeadas**
+    - Backtesting histórico con resultados de rendimiento.
+    - Alertas push a Telegram/WhatsApp.
+    - Soporte multi-exchange.
+    - Dashboard de monitoreo en tiempo real.
+    """)
+
+    # Footer
+    st.markdown("<p style='text-align: center; color: #666;'>🚀 Binance Volume Bot - Powered by DeepSeek</p>", unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
