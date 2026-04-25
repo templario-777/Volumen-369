@@ -1,10 +1,9 @@
 import time
-import json
 import ccxt
 import pandas as pd
 import streamlit as st
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # =========================
 # CONFIGURACIÓN Y ESTILOS
@@ -32,9 +31,9 @@ st.markdown("""
         .stMetric {font-size: 0.95rem;}
         h1, h2, h3, .stSidebar, .stButton>button {font-size: 1.2rem !important;}
     }
-    .signal-buy {background-color:#d4edda;color:#155724;padding:8px;border-radius:6px;}
-    .signal-sell {background-color:#f8d7da;color:#721c24;padding:8px;border-radius:6px;}
-    .signal-hold {background-color:#e2e3e5;color:#383d41;padding:8px;border-radius:6px;}
+    .signal-buy {background:#d4edda;color:#155724;padding:8px;border-radius:6px;}
+    .signal-sell {background:#f8d7da;color:#721c24;padding:8px;border-radius:6px;}
+    .signal-hold {background:#e2e3e5;color:#383d41;padding:8px;border-radius:6px;}
     .coin-card {border-left: 4px solid #007bff; padding:10px; margin:5px 0; background:#f8f9fa;}
     .operacion-abierta {border-left: 5px solid #007bff; background: #e7f3ff; padding:10px; margin:5px 0;}
     .operacion-cerrada {border-left: 5px solid #28a745; background: #d4edda; padding:10px; margin:5px 0;}
@@ -52,16 +51,14 @@ if 'top_monedas' not in st.session_state:
     st.session_state.top_monedas = []
 if 'fecha_actual' not in st.session_state:
     st.session_state.fecha_actual = datetime.now().strftime("%Y-%m-%d")
-if 'alertas_enviadas' not in st.session_state:
-    st.session_state.alertas_enviadas = []
 
 # =========================
 # CONSTANTES
 # =========================
 TOP_N = 10
-SCAN_INTERVAL = 60  # segundos
-TP_PCT = 4.0  # Take Profit %
-SL_PCT = 2.0  # Stop Loss %
+SCAN_INTERVAL = 60
+TP_PCT = 4.0
+SL_PCT = 2.0
 
 # =========================
 # FUNCIONES DE CONEXIÓN
@@ -80,14 +77,54 @@ def crear_exchange():
                 st.sidebar.warning("⚠️ Configura tus API Keys en Secrets")
                 return None
 
-        exchange = ccxt.binance({
+        config = {
             'apiKey': api_key.strip(),
             'secret': api_secret.strip(),
             'enableRateLimit': True,
-            'options': {'defaultType': 'spot'}
-        })
-        exchange.load_markets()
-        return exchange
+            'options': {'defaultType': 'spot'},
+            'timeout': 30000,
+        }
+
+        # Agregar proxy si está configurado
+        proxy_url = st.secrets.get("PROXY_URL", "")
+        if proxy_url:
+            config['proxies'] = {
+                'http': proxy_url,
+                'https': proxy_url,
+            }
+            st.sidebar.info(f"🔗 Usando proxy")
+
+        exchange = ccxt.binance(config)
+
+        # Intentar conectar con reintentos
+        for intento in range(3):
+            try:
+                exchange.load_markets()
+                return exchange
+            except Exception as e:
+                error_str = str(e).lower()
+                if "451" in str(e) or "restricted" in error_str:
+                    st.error("""
+🚫 **Error 451: Ubicación restringida**
+
+**Causa:** Binance bloquea el acceso desde el servidor de Streamlit Cloud.
+
+**Solución inmediata:**
+1. Ve a tu app en Streamlit Cloud → **Settings → Secrets**
+2. Añade: `PROXY_URL = http://usuario:password@proxy-ip:puerto`
+3. O usa una VPS fuera de zona restringida
+
+**Proxies gratuitos recomendados:**
+- [Smartproxy](https://smartproxy.com)
+- [IPRoyal](https://iproyal.com)
+- Cloudflare Workers (gratuito)
+                    """)
+                    return None
+                if intento < 2:
+                    time.sleep(2 ** intento)
+                else:
+                    raise e
+
     except Exception as e:
         st.error(f"❌ Error conectando a Binance: {str(e)}")
         return None
@@ -119,25 +156,22 @@ def calcular_indicadores(df):
 def detectar_patron(df):
     if len(df) < 2:
         return "HOLD", 0
+
     row = df.iloc[-1]
     prev = df.iloc[-2]
 
-    # Condiciones de compra
     alcista = row['sma50'] > row['sma200'] if 'sma50' in df.columns else False
-    ruptura_alcista = row['close'] > prev['high']
-    vol_explosivo = row['rvol'] > 2.0 if 'rvol' in df.columns else False
-    sobre_vwap = row['close'] > row['vwap'] if 'vwap' in df.columns else False
-
-    if alcista and ruptura_alcista and vol_explosivo and sobre_vwap:
-        return "BUY", min(100, int(row['rvol'] * 30) if 'rvol' in df.columns else 80)
-
-    # Condiciones de venta
     bajista = row['sma50'] < row['sma200'] if 'sma50' in df.columns else False
-    ruptura_bajista = row['close'] < prev['low']
-    bajo_vwap = row['close'] < row['vwap'] if 'vwap' in df.columns else False
 
-    if bajista and ruptura_bajista and vol_explosivo and bajo_vwap:
-        return "SELL", min(100, int(row['rvol'] * 30) if 'rvol' in df.columns else 80)
+    ruptura_alcista = row['close'] > prev['high'] and row['volume'] > prev['volume'] * 1.5
+    ruptura_bajista = row['close'] < prev['low'] and row['volume'] > prev['volume'] * 1.5
+
+    vol_explosivo = row['rvol'] > 2.0 if 'rvol' in df.columns else False
+
+    if alcista and ruptura_alcista and vol_explosivo:
+        return "BUY", min(100, int(row['rvol'] * 30))
+    if bajista and ruptura_bajista and vol_explosivo:
+        return "SELL", min(100, int(row['rvol'] * 30))
 
     return "HOLD", 0
 
@@ -150,7 +184,7 @@ def ejecutar_orden_real(exchange, symbol, side, amount_usd):
         precio = ticker['last']
         cantidad = amount_usd / precio
 
-        # Obtener precisión del mercado
+        # Ajustar precisión
         market = exchange.market(symbol)
         cantidad = round(cantidad, market['precision']['amount'])
 
@@ -176,9 +210,11 @@ def ejecutar_orden_real(exchange, symbol, side, amount_usd):
             'status': 'ABIERTA',
             'orden_id': orden['id']
         }
+
         st.session_state.operaciones_activas.append(operacion)
         return True, precio, sl, tp
     except Exception as e:
+        st.error(f"❌ Error ejecutando orden: {str(e)}")
         return False, 0, 0, 0
 
 def gestionar_operaciones_abiertas(exchange):
@@ -186,6 +222,7 @@ def gestionar_operaciones_abiertas(exchange):
         return
 
     ops_a_cerrar = []
+
     for op in st.session_state.operaciones_activas:
         try:
             ticker = exchange.fetch_ticker(op['symbol'])
@@ -196,50 +233,58 @@ def gestionar_operaciones_abiertas(exchange):
 
             if op['side'] == 'BUY':
                 if precio_actual >= op['tp']:
-                    cerrar = True
                     motivo = "TAKE PROFIT ✅"
-                elif precio_actual <= op['sl']:
                     cerrar = True
+                elif precio_actual <= op['sl']:
                     motivo = "STOP LOSS ❌"
+                    cerrar = True
             else:  # SELL
                 if precio_actual <= op['tp']:
-                    cerrar = True
                     motivo = "TAKE PROFIT ✅"
-                elif precio_actual >= op['sl']:
                     cerrar = True
+                elif precio_actual >= op['sl']:
                     motivo = "STOP LOSS ❌"
+                    cerrar = True
 
             if cerrar:
-                # Cerrar orden
-                side_cierre = 'sell' if op['side'] == 'BUY' else 'buy'
-                exchange.create_order(op['symbol'], 'market', side_cierre, op['cantidad'])
+                ops_a_cerrar.append((op, precio_actual, motivo))
 
-                # Calcular ganancia
-                if op['side'] == 'BUY':
-                    ganancia_pct = (precio_actual - op['entrada']) / op['entrada'] * 100
-                else:
-                    ganancia_pct = (op['entrada'] - precio_actual) / op['entrada'] * 100
-
-                op['cierre'] = precio_actual
-                op['motivo'] = motivo
-                op['ganancia_pct'] = ganancia_pct
-                op['status'] = 'CERRADA'
-
-                st.session_state.operaciones_activas.remove(op)
-                st.session_state.historial.insert(0, op)
-
-                # Enviar alerta de cierre
-                enviar_alerta_telegram(
-                    f"🏁 {motivo}\n{op['symbol']}\n"
-                    f"Entrada: {op['entrada']:.4f}\n"
-                    f"Cierre: {precio_actual:.4f}\n"
-                    f"Ganancia: {ganancia_pct:.2f}%"
-                )
         except Exception as e:
             st.warning(f"Error gestionando {op['symbol']}: {str(e)}")
 
+    # Cerrar operaciones
+    for op, precio, motivo in ops_a_cerrar:
+        try:
+            side_cierre = 'sell' if op['side'] == 'BUY' else 'buy'
+            exchange.create_order(op['symbol'], 'market', side_cierre, op['cantidad'])
+
+            # Calcular ganancia
+            if op['side'] == 'BUY':
+                ganancia_pct = ((precio - op['entrada']) / op['entrada']) * 100
+            else:
+                ganancia_pct = ((op['entrada'] - precio) / op['entrada']) * 100
+
+            op['cierre'] = precio
+            op['motivo'] = motivo
+            op['ganancia_pct'] = ganancia_pct
+            op['status'] = 'CERRADA'
+
+            st.session_state.operaciones_activas.remove(op)
+            st.session_state.historial.insert(0, op)
+
+            # Enviar alerta
+            enviar_alerta_telegram(
+                f"🏁 *{motivo} {op['symbol']}*\n"
+                f"Entrada: {op['entrada']:.4f}\n"
+                f"Cierre: {precio:.4f}\n"
+                f"Ganancia: {ganancia_pct:.2f}%"
+            )
+
+        except Exception as e:
+            st.error(f"Error cerrando {op['symbol']}: {str(e)}")
+
 # =========================
-# TELEGRAM Y NOTIFICACIONES
+# TELEGRAM
 # =========================
 def enviar_alerta_telegram(mensaje):
     try:
@@ -252,10 +297,15 @@ def enviar_alerta_telegram(mensaje):
             chat_id = st.session_state.get('tg_chat_id_input', "")
 
         if not bot_token or not chat_id:
+            st.warning("⚠️ Faltan credenciales de Telegram")
             return False
 
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
+        payload = {
+            "chat_id": chat_id,
+            "text": mensaje,
+            "parse_mode": "Markdown"
+        }
         r = requests.post(url, json=payload, timeout=10)
         return r.status_code == 200
     except Exception as e:
@@ -272,47 +322,51 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuración")
 
-        # Credenciales
         st.subheader("🔐 Binance")
-        api_key = st.text_input("API Key", type="password", key="api_key_sb")
-        api_secret = st.text_input("API Secret", type="password", key="api_secret_sb")
-        st.session_state.api_key_ui = api_key
-        st.session_state.api_secret_ui = api_secret
+        api_key_ui = st.text_input("API Key", type="password", key="api_key_sb")
+        api_secret_ui = st.text_input("API Secret", type="password", key="api_secret_sb")
+        st.session_state.api_key_ui = api_key_ui
+        st.session_state.api_secret_ui = api_secret_ui
 
-        # Telegram
         st.subheader("📢 Telegram")
-        tg_token = st.text_input("Bot Token", type="password", key="tg_token_sb")
+        tg_bot = st.text_input("Bot Token", type="password", key="tg_bot_sb")
         tg_chat = st.text_input("Chat ID", key="tg_chat_sb")
-        st.session_state.tg_bot_token_input = tg_token
+        st.session_state.tg_bot_token_input = tg_bot
         st.session_state.tg_chat_id_input = tg_chat
 
-        st.markdown("---")
-        st.caption("💡 Las claves sensibles se guardan en Streamlit Secrets")
+        st.subheader("📊 Parámetros")
+        capital_usd = st.number_input("USD por operación", 10.0, 1000.0, 50.0)
+        usar_telegram = st.checkbox("Activar alertas Telegram", value=True)
 
-    # Conexión
+        st.markdown("---")
+        st.caption("💡 Configura PROXY_URL en Secrets si hay error 451")
+
+    # Conectar
     exchange = crear_exchange()
     if not exchange:
         st.stop()
 
     st.success("✅ Conectado a Binance")
 
-    # Seleccionar monedas
+    # Gestionar operaciones abiertas (check SL/TP)
+    gestionar_operaciones_abiertas(exchange)
+
+    # Seleccionar top monedas
     if st.sidebar.button("🔍 Seleccionar Top 10", type="primary"):
         with st.spinner("Analizando mercado..."):
             try:
                 markets = [m['symbol'] for m in exchange.fetch_markets()
-                          if m.get('spot') and m.get('active') and m['quote'] == 'USDT']
+                           if m.get('spot') and m.get('active') and m['quote'] == 'USDT']
                 st.session_state.top_monedas = markets[:TOP_N]
                 st.success(f"✅ Monitoreando {len(markets[:TOP_N])} monedas")
             except Exception as e:
-                st.error(f"Error seleccionando monedas: {e}")
+                st.error(f"Error seleccionando monedas: {str(e)}")
 
-    # Mostrar monedas seleccionadas
+    # Mostrar monedas seguidas
     if st.session_state.top_monedas:
         st.subheader(f"📋 Monitoreo 24/7 - {len(st.session_state.top_monedas)} monedas")
 
-        # Escaneo en tiempo real
-        for i, symbol in enumerate(st.session_state.top_monedas):
+        for symbol in st.session_state.top_monedas:
             try:
                 df = obtener_ohlcv(exchange, symbol)
                 if df.empty:
@@ -342,32 +396,25 @@ def main():
                             "signal-sell" if patron == "SELL" else "signal-hold"
                     st.markdown(f'<div class="{clase}">{patron}</div>', unsafe_allow_html=True)
 
-                # Gráfico con Streamlit nativo
-                with st.expander(f"📈 Gráfico {symbol}"):
-                    chart_data = df[['timestamp', 'close', 'vwap']].set_index('timestamp')
-                    st.line_chart(chart_data)
-
                 # Ejecutar si hay señal fuerte
                 if patron in ["BUY", "SELL"] and fuerza >= 80:
-                    capital = st.sidebar.number_input("USD por operación", 10.0, 1000.0, 50.0, key=f"cap_{symbol}")
+                    side = 'buy' if patron == "BUY" else 'sell'
                     if st.button(f"Ejecutar {patron}", key=f"btn_{symbol}"):
-                        side = 'buy' if patron == "BUY" else 'sell'
-                        ok, precio, sl, tp = ejecutar_orden_real(exchange, symbol, side, capital)
+                        ok, precio, sl, tp = ejecutar_orden_real(exchange, symbol, side, capital_usd)
                         if ok:
                             st.success(f"✅ Orden ejecutada: {patron} @ {precio:.4f}")
-                            # Enviar alerta
-                            enviar_alerta_telegram(
-                                f"🚨 {patron} EJECUTADA\n{symbol}\n"
-                                f"Precio: {precio:.4f}\n"
-                                f"SL: {sl:.4f} | TP: {tp:.4f}"
-                            )
+                            if usar_telegram:
+                                enviar_alerta_telegram(
+                                    f"🚨 *{patron} EJECUTADA*\n"
+                                    f"{symbol}\n"
+                                    f"Entrada: {precio:.4f}\n"
+                                    f"SL: {sl:.4f} | TP: {tp:.4f}"
+                                )
+
             except Exception as e:
                 st.error(f"Error con {symbol}: {str(e)}")
 
-        # Gestionar operaciones abiertas
-        gestionar_operaciones_abiertas(exchange)
-
-    # Panel de operaciones activas
+    # Operaciones activas
     if st.session_state.operaciones_activas:
         st.subheader("💼 Operaciones Abiertas")
         for op in st.session_state.operaciones_activas:
@@ -383,18 +430,21 @@ def main():
 
     # Historial
     if st.session_state.historial:
-        st.subheader("📊 Historial de Operaciones")
+        st.subheader("📊 Historial")
         for hist in st.session_state.historial[:10]:
             color = "operacion-cerrada" if hist.get('ganancia_pct', 0) > 0 else "signal-sell"
             st.markdown(f"""
             <div class="{color}">
-                <b>{hist['symbol']}</b> | {hist['motivo']}<br>
-                Entrada: {hist['entrada']:.4f} | Cierre: {hist['cierre']:.4f}<br>
-                Ganancia: {hist.get('ganancia_pct', 0):.2f}%
+                <b>{hist['symbol']}</b> | {hist['motivo']} |
+                <span style="color:{'green' if hist.get('ganancia_pct', 0) > 0 else 'red'}">
+                {hist.get('ganancia_pct', 0):.2f}%
+                </span><br>
+                Entrada: {hist['entrada']:.4f} |
+                Cierre: {hist.get('cierre', 0):.4f}
             </div>
             """, unsafe_allow_html=True)
 
-    # Auto-refresh para monitoreo continuo
+    # Auto-refresh
     if st.session_state.top_monedas:
         time.sleep(1)
         st.experimental_rerun()
