@@ -1,26 +1,45 @@
 /**
  * 🚀 Volumen-369 Trading Bot - Cloudflare Worker Edition
- * Autónomo, 24/7, sin interfaz web.
+ * Autónomo, 24/7, con Dashboard HTML moderno.
  */
 
-addEventListener("scheduled", event => {
-  event.waitUntil(runBot().catch(err => console.error("Error en cron:", err)));
+// Listener para peticiones Web (Dashboard, Proxy, etc)
+addEventListener("fetch", event => {
+  event.respondWith(
+    handleRequest(event.request).catch(err => {
+      return new Response(JSON.stringify({ 
+        error: "Worker Runtime Error", 
+        message: err.message,
+        stack: err.stack 
+      }), { 
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      });
+    })
+  );
 });
 
-addEventListener("fetch", event => {
-  const url = new URL(event.request.url);
+// Listener para ejecución automática (Cron)
+addEventListener("scheduled", event => {
+  event.waitUntil(
+    runBot().catch(err => console.error("Error en cron:", err))
+  );
+});
+
+async function handleRequest(request) {
+  const url = new URL(request.url);
   const targetUrl = url.searchParams.get("target");
 
   if (targetUrl) {
-    event.respondWith(handleProxy(event.request, targetUrl));
+    return await handleProxy(request, targetUrl);
   } else if (url.pathname === "/run") {
-    event.respondWith(handleManualRun());
+    return await handleManualRun();
   } else if (url.pathname === "/api/status") {
-    event.respondWith(handleStatus());
+    return await handleStatus();
   } else {
-    event.respondWith(handleDashboard());
+    return await handleDashboard();
   }
-});
+}
 
 async function handleDashboard() {
   const html = `
@@ -147,11 +166,8 @@ async function handleDashboard() {
 
 async function handleStatus() {
   try {
-    const config = {
-      TOP_N: typeof globalThis.TOP_N !== 'undefined' ? parseInt(globalThis.TOP_N) : 10,
-    };
-    
-    const symbols = await getTopSymbols(config.TOP_N);
+    const topN = typeof TOP_N !== 'undefined' ? parseInt(TOP_N) : 10;
+    const symbols = await getTopSymbols(topN);
     const statusData = [];
 
     for (const symbol of symbols) {
@@ -189,12 +205,11 @@ async function handleProxy(request, targetUrl) {
     const url = new URL(targetUrl);
     const proxyRequest = new Request(url, {
       method: request.method,
-      headers: request.headers,
+      headers: new Headers(request.headers),
       body: request.method !== 'GET' && request.method !== 'HEAD' ? await request.arrayBuffer() : null,
       redirect: 'follow'
     });
 
-    // Eliminar headers que pueden causar problemas en Cloudflare
     proxyRequest.headers.delete("Host");
     proxyRequest.headers.delete("cf-connecting-ip");
     proxyRequest.headers.delete("cf-ipcountry");
@@ -202,8 +217,6 @@ async function handleProxy(request, targetUrl) {
     proxyRequest.headers.delete("cf-visitor");
 
     const response = await fetch(proxyRequest);
-    
-    // Copiar la respuesta y añadir CORS
     const responseHeaders = new Headers(response.headers);
     responseHeaders.set("Access-Control-Allow-Origin", "*");
     responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -223,36 +236,24 @@ async function handleProxy(request, targetUrl) {
 }
 
 async function handleManualRun() {
-  try {
-    await runBot();
-    return new Response("Bot ejecutado correctamente. Revisa tu Telegram.");
-  } catch (err) {
-    return new Response("Error: " + err.message, { status: 500 });
-  }
+  await runBot();
+  return new Response("Bot ejecutado correctamente. Revisa tu Telegram.");
 }
 
 async function runBot() {
-  // En Cloudflare Service Workers, las variables de entorno son globales
-  const config = {
-    BINANCE_API_KEY: typeof globalThis.BINANCE_API_KEY !== 'undefined' ? globalThis.BINANCE_API_KEY : null,
-    BINANCE_API_SECRET: typeof globalThis.BINANCE_API_SECRET !== 'undefined' ? globalThis.BINANCE_API_SECRET : null,
-    TELEGRAM_BOT_TOKEN: typeof globalThis.TELEGRAM_BOT_TOKEN !== 'undefined' ? globalThis.TELEGRAM_BOT_TOKEN : null,
-    TELEGRAM_CHAT_ID: typeof globalThis.TELEGRAM_CHAT_ID !== 'undefined' ? globalThis.TELEGRAM_CHAT_ID : null,
-    USD_PER_TRADE: typeof globalThis.USD_PER_TRADE !== 'undefined' ? parseFloat(globalThis.USD_PER_TRADE) : 50,
-    TOP_N: typeof globalThis.TOP_N !== 'undefined' ? parseInt(globalThis.TOP_N) : 10,
-  };
+  const apiKey = typeof BINANCE_API_KEY !== 'undefined' ? BINANCE_API_KEY : null;
+  const apiSecret = typeof BINANCE_API_SECRET !== 'undefined' ? BINANCE_API_SECRET : null;
+  const botToken = typeof TELEGRAM_BOT_TOKEN !== 'undefined' ? TELEGRAM_BOT_TOKEN : null;
+  const chatId = typeof TELEGRAM_CHAT_ID !== 'undefined' ? TELEGRAM_CHAT_ID : null;
+  const usdPerTrade = typeof USD_PER_TRADE !== 'undefined' ? parseFloat(USD_PER_TRADE) : 50;
+  const topN = typeof TOP_N !== 'undefined' ? parseInt(TOP_N) : 10;
 
-  if (!config.BINANCE_API_KEY || !config.BINANCE_API_SECRET) {
+  if (!apiKey || !apiSecret) {
     console.log("Faltan API Keys. El bot no puede continuar.");
     return;
   }
 
-  const symbols = await getTopSymbols(config.TOP_N);
-  if (!symbols || symbols.length === 0) {
-    console.error("No se pudieron obtener símbolos de Binance.");
-    return;
-  }
-  
+  const symbols = await getTopSymbols(topN);
   for (const symbol of symbols) {
     try {
       const candles = await getKlines(symbol, '5m', 200);
@@ -262,7 +263,8 @@ async function runBot() {
       const signal = detectPattern(indicators);
 
       if (signal.patron !== "HOLD" && signal.fuerza >= 80) {
-        await executeTrade(symbol, signal.patron, config.USD_PER_TRADE, config, indicators.close);
+        const config = { TELEGRAM_BOT_TOKEN: botToken, TELEGRAM_CHAT_ID: chatId };
+        await executeTrade(symbol, signal.patron, usdPerTrade, config, indicators.close);
       }
     } catch (err) {
       console.error(`Error en ${symbol}:`, err.message);
@@ -271,24 +273,19 @@ async function runBot() {
 }
 
 async function getTopSymbols(topN) {
-  try {
-    const resp = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
-      headers: { "User-Agent": "Mozilla/5.0" }
-    });
-    if (!resp.ok) {
-      const errorText = await resp.text();
-      throw new Error(`Binance API error: ${resp.status} - ${errorText}`);
-    }
-    const data = await resp.json();
-    return data
-      .filter(t => t.symbol && t.symbol.endsWith("USDT"))
-      .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-      .slice(0, topN)
-      .map(t => t.symbol);
-  } catch (e) {
-    console.error("Error getTopSymbols:", e.message);
-    throw e; // Lanzar el error para capturarlo en handleStatus
+  const resp = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
+    headers: { "User-Agent": "Mozilla/5.0" }
+  });
+  if (!resp.ok) {
+    const errorText = await resp.text();
+    throw new Error(`Binance API error: ${resp.status} - ${errorText}`);
   }
+  const data = await resp.json();
+  return data
+    .filter(t => t.symbol && t.symbol.endsWith("USDT"))
+    .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+    .slice(0, topN)
+    .map(t => t.symbol);
 }
 
 async function getKlines(symbol, interval, limit) {
@@ -304,58 +301,40 @@ async function getKlines(symbol, interval, limit) {
 function calculateIndicators(symbol, candles) {
   const prices = candles.map(c => parseFloat(c[4])); 
   const volumes = candles.map(c => parseFloat(c[5])); 
-
   const sma = (data, period) => {
     if (data.length < period) return 0;
-    const slice = data.slice(-period);
-    return slice.reduce((a, b) => a + b, 0) / period;
+    return data.slice(-period).reduce((a, b) => a + b, 0) / period;
   };
-
   const currentVol = volumes[volumes.length - 1];
   const ma20Vol = sma(volumes.slice(0, -1), 20);
   const rvol = ma20Vol > 0 ? currentVol / ma20Vol : 0;
-
   return {
-    symbol: symbol,
-    close: prices[prices.length - 1],
+    symbol, close: prices[prices.length - 1],
     prevHigh: parseFloat(candles[candles.length - 2][2]),
     prevLow: parseFloat(candles[candles.length - 2][3]),
-    currentVol,
-    prevVol: parseFloat(candles[candles.length - 2][5]),
-    rvol,
-    sma50: sma(prices, 50),
-    sma200: sma(prices, 200)
+    currentVol, prevVol: parseFloat(candles[candles.length - 2][5]),
+    rvol, sma50: sma(prices, 50), sma200: sma(prices, 200)
   };
 }
 
 function detectPattern(ind) {
   const alcista = ind.sma50 > ind.sma200;
   const bajista = ind.sma50 < ind.sma200;
-
   const rupturaAlcista = ind.close > ind.prevHigh && ind.currentVol > ind.prevVol * 1.5;
   const rupturaBajista = ind.close < ind.prevLow && ind.currentVol > ind.prevVol * 1.5;
-
   const volExplosivo = ind.rvol > 2.0;
-
-  if (alcista && rupturaAlcista && volExplosivo) {
-    return { patron: "BUY", fuerza: Math.min(100, ind.rvol * 30) };
-  }
-  if (bajista && rupturaBajista && volExplosivo) {
-    return { patron: "SELL", fuerza: Math.min(100, ind.rvol * 30) };
-  }
-
+  if (alcista && rupturaAlcista && volExplosivo) return { patron: "BUY", fuerza: Math.min(100, ind.rvol * 30) };
+  if (bajista && rupturaBajista && volExplosivo) return { patron: "SELL", fuerza: Math.min(100, ind.rvol * 30) };
   return { patron: "HOLD", fuerza: 0 };
 }
 
 async function executeTrade(symbol, side, amountUsd, config, price) {
-  // Formateamos el mensaje para que sea igual al del bot.py
   const msg = `🚨 SEÑAL: ${side} en ${symbol} (Monto: ${amountUsd} USD, Precio: ${price})`;
-  
   await sendTelegram(msg, config);
-  console.log(`Ejecutando ${side} para ${symbol} a precio ${price}`);
 }
 
 async function sendTelegram(text, config) {
+  if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) return;
   const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`;
   await fetch(url, {
     method: 'POST',
