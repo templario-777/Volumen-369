@@ -49,19 +49,16 @@ if 'historial' not in st.session_state:
     st.session_state.historial = []
 if 'top_monedas' not in st.session_state:
     st.session_state.top_monedas = []
-if 'fecha_actual' not in st.session_state:
-    st.session_state.fecha_actual = datetime.now().strftime("%Y-%m-%d")
 
 # =========================
 # CONSTANTES
 # =========================
 TOP_N = 10
-SCAN_INTERVAL = 60
 TP_PCT = 4.0
 SL_PCT = 2.0
 
 # =========================
-# FUNCIONES DE CONEXIÓN
+# FUNCIÓN DE CONEXIÓN (CON CLOUDFLARE WORKER)
 # =========================
 @st.cache_resource
 def crear_exchange():
@@ -85,47 +82,40 @@ def crear_exchange():
             'timeout': 30000,
         }
 
-        # Agregar proxy si está configurado
-        proxy_url = st.secrets.get("PROXY_URL", "")
-        if not proxy_url:
-            # Buscar en inputs de UI
-            proxy_url = st.session_state.get('proxy_input', "")
+        # ÚNICA OPCIÓN: Cloudflare Worker como proxy
+        worker_url = st.secrets.get("CLOUDFLARE_WORKER_URL", "")
+        if not worker_url:
+            worker_url = st.session_state.get('worker_url_input', "")
 
-        if proxy_url:
-            # Validar formato
-            if not proxy_url.startswith("http"):
-                proxy_url = "http://" + proxy_url
+        if worker_url:
+            # Formato: https://binance-proxy.tu-cuenta.workers.dev?target=https://api.binance.com
+            proxy_url = f"{worker_url}?target=https://api.binance.com"
             config['proxies'] = {
                 'http': proxy_url,
                 'https': proxy_url,
             }
-            st.sidebar.success(f"🔗 Proxy: {proxy_url[:30]}...")
+            st.sidebar.success(f"🔗 Usando Cloudflare Worker")
+        else:
+            st.sidebar.error("""
+            🚫 **Error 451: Ubicación restringida**
+
+            **Solución única: Cloudflare Worker**
+            1. Crea un Worker en https://dash.cloudflare.com/
+            2. Usa el código que te proporcioné abajo
+            3. En Secrets añade: `CLOUDFLARE_WORKER_URL=https://tu-worker.workers.dev`
+            """)
+            return None
 
         exchange = ccxt.binance(config)
 
-        # Intentar conectar con reintentos
+        # Verificar conexión
         for intento in range(3):
             try:
                 exchange.load_markets()
                 return exchange
             except Exception as e:
-                error_str = str(e).lower()
-                if "451" in str(e) or "restricted" in error_str:
-                    st.error("""
-🚫 **Error 451: Ubicación restringida**
-
-**Causa:** Binance bloquea el acceso desde el servidor de Streamlit Cloud.
-
-**Solución inmediata:**
-1. Ve a tu app en Streamlit Cloud → **Settings → Secrets**
-2. Añade: `PROXY_URL = http://usuario:password@proxy-ip:puerto`
-3. O usa una VPS fuera de zona restringida
-
-**Proxies gratuitos recomendados:**
-- [Smartproxy](https://smartproxy.com)
-- [IPRoyal](https://iproyal.com)
-- Cloudflare Workers (gratuito)
-                    """)
+                if "451" in str(e) or "restricted" in str(e).lower():
+                    st.error("🚫 Binance bloquea esta ubicación. Usa el Cloudflare Worker.")
                     return None
                 if intento < 2:
                     time.sleep(2 ** intento)
@@ -146,7 +136,7 @@ def obtener_ohlcv(exchange, symbol, timeframe='5m', limit=100):
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         return df
     except Exception as e:
-        st.error(f"Error obteniendo datos de {symbol}: {str(e)}")
+        st.error(f"Error obteniendo {symbol}: {str(e)}")
         return pd.DataFrame()
 
 def calcular_indicadores(df):
@@ -191,14 +181,11 @@ def ejecutar_orden_real(exchange, symbol, side, amount_usd):
         precio = ticker['last']
         cantidad = amount_usd / precio
 
-        # Ajustar precisión
         market = exchange.market(symbol)
         cantidad = round(cantidad, market['precision']['amount'])
 
-        # Ejecutar orden
         orden = exchange.create_order(symbol, 'market', side, cantidad)
 
-        # Calcular SL y TP
         if side == 'buy':
             sl = precio * (1 - SL_PCT/100)
             tp = precio * (1 + TP_PCT/100)
@@ -214,10 +201,8 @@ def ejecutar_orden_real(exchange, symbol, side, amount_usd):
             'tp': tp,
             'cantidad': cantidad,
             'timestamp': datetime.now(),
-            'status': 'ABIERTA',
-            'orden_id': orden['id']
+            'status': 'ABIERTA'
         }
-
         st.session_state.operaciones_activas.append(operacion)
         return True, precio, sl, tp
     except Exception as e:
@@ -255,21 +240,15 @@ def gestionar_operaciones_abiertas(exchange):
 
             if cerrar:
                 ops_a_cerrar.append((op, precio_actual, motivo))
-
         except Exception as e:
             st.warning(f"Error gestionando {op['symbol']}: {str(e)}")
 
-    # Cerrar operaciones
     for op, precio, motivo in ops_a_cerrar:
         try:
             side_cierre = 'sell' if op['side'] == 'BUY' else 'buy'
             exchange.create_order(op['symbol'], 'market', side_cierre, op['cantidad'])
 
-            # Calcular ganancia
-            if op['side'] == 'BUY':
-                ganancia_pct = ((precio - op['entrada']) / op['entrada']) * 100
-            else:
-                ganancia_pct = ((op['entrada'] - precio) / op['entrada']) * 100
+            ganancia_pct = ((precio - op['entrada']) / op['entrada'] * 100) if op['side']=='BUY' else ((op['entrada'] - precio) / op['entrada'] * 100)
 
             op['cierre'] = precio
             op['motivo'] = motivo
@@ -279,14 +258,13 @@ def gestionar_operaciones_abiertas(exchange):
             st.session_state.operaciones_activas.remove(op)
             st.session_state.historial.insert(0, op)
 
-            # Enviar alerta
+            # Enviar alerta de cierre
             enviar_alerta_telegram(
                 f"🏁 *{motivo} {op['symbol']}*\n"
                 f"Entrada: {op['entrada']:.4f}\n"
                 f"Cierre: {precio:.4f}\n"
                 f"Ganancia: {ganancia_pct:.2f}%"
             )
-
         except Exception as e:
             st.error(f"Error cerrando {op['symbol']}: {str(e)}")
 
@@ -299,20 +277,15 @@ def enviar_alerta_telegram(mensaje):
         chat_id = st.secrets.get("TELEGRAM_CHAT_ID", "")
 
         if not bot_token:
-            bot_token = st.session_state.get('tg_bot_token_input', "")
+            bot_token = st.session_state.get('tg_bot_input', "")
         if not chat_id:
-            chat_id = st.session_state.get('tg_chat_id_input', "")
+            chat_id = st.session_state.get('tg_chat_input', "")
 
         if not bot_token or not chat_id:
-            st.warning("⚠️ Faltan credenciales de Telegram")
             return False
 
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-        payload = {
-            "chat_id": chat_id,
-            "text": mensaje,
-            "parse_mode": "Markdown"
-        }
+        payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
         r = requests.post(url, json=payload, timeout=10)
         return r.status_code == 200
     except Exception as e:
@@ -329,49 +302,60 @@ def main():
     with st.sidebar:
         st.header("⚙️ Configuración")
 
+        # Credenciales
         st.subheader("🔐 Binance")
         api_key_ui = st.text_input("API Key", type="password", key="api_key_sb")
         api_secret_ui = st.text_input("API Secret", type="password", key="api_secret_sb")
         st.session_state.api_key_ui = api_key_ui
         st.session_state.api_secret_ui = api_secret_ui
 
+        # Cloudflare Worker (ÚNICO)
+        st.subheader("🔗 Cloudflare Worker (Proxy)")
+        worker_url = st.text_input("URL del Worker", key="worker_sb",
+                                  help="Ejemplo: https://binance-proxy.tu-cuenta.workers.dev")
+        st.session_state.worker_url_input = worker_url
+
+        st.markdown("""
+        **Configuración única necesaria:**
+        1. Crea Worker en https://dash.cloudflare.com/
+        2. Usa el código del Deploy
+        3. En Secrets añade: `CLOUDFLARE_WORKER_URL=https://tu-worker.workers.dev`
+        """)
+
+        # Telegram
         st.subheader("📢 Telegram")
         tg_bot = st.text_input("Bot Token", type="password", key="tg_bot_sb")
         tg_chat = st.text_input("Chat ID", key="tg_chat_sb")
-        st.session_state.tg_bot_token_input = tg_bot
-        st.session_state.tg_chat_id_input = tg_chat
-
-        st.subheader("📊 Parámetros")
-        capital_usd = st.number_input("USD por operación", 10.0, 1000.0, 50.0)
-        usar_telegram = st.checkbox("Activar alertas Telegram", value=True)
-
-        st.subheader("🌐 Proxy (para Error 451)")
-        proxy_input = st.text_input("Proxy URL (ej: http://ip:puerto)", type="password", key="proxy_sb")
-        st.session_state.proxy_input = proxy_input
+        st.session_state.tg_bot_input = tg_bot
+        st.session_state.tg_chat_input = tg_chat
 
         st.markdown("---")
-        st.caption("💡 Si hay Error 451, usa un proxy de EE.UU. o Europa")
+        usar_telegram = st.checkbox("Activar alertas Telegram", value=True)
 
-    # Conectar
+    # Conexión
     exchange = crear_exchange()
     if not exchange:
         st.stop()
 
-    st.success("✅ Conectado a Binance")
+    st.success("✅ Conectado a Binance vía Cloudflare Worker")
 
     # Gestionar operaciones abiertas (check SL/TP)
     gestionar_operaciones_abiertas(exchange)
 
-    # Seleccionar top monedas
-    if st.sidebar.button("🔍 Seleccionar Top 10", type="primary"):
-        with st.spinner("Analizando mercado..."):
-            try:
-                markets = [m['symbol'] for m in exchange.fetch_markets()
-                           if m.get('spot') and m.get('active') and m['quote'] == 'USDT']
-                st.session_state.top_monedas = markets[:TOP_N]
-                st.success(f"✅ Monitoreando {len(markets[:TOP_N])} monedas")
-            except Exception as e:
-                st.error(f"Error seleccionando monedas: {str(e)}")
+    # Controles
+    col1, col2 = st.columns(2)
+    with col1:
+        capital_usd = st.number_input("USD por operación", 10.0, 1000.0, 50.0)
+    with col2:
+        if st.button("🔍 Seleccionar Top 10", type="primary"):
+            with st.spinner("Analizando mercado..."):
+                try:
+                    markets = [m['symbol'] for m in exchange.fetch_markets()
+                              if m.get('spot') and m.get('active') and m['quote'] == 'USDT']
+                    st.session_state.top_monedas = markets[:TOP_N]
+                    st.success(f"✅ Monitoreando {len(markets[:TOP_N])} monedas")
+                except Exception as e:
+                    st.error(f"Error: {str(e)}")
 
     # Mostrar monedas seguidas
     if st.session_state.top_monedas:
@@ -425,7 +409,7 @@ def main():
             except Exception as e:
                 st.error(f"Error con {symbol}: {str(e)}")
 
-    # Operaciones activas
+    # Operaciones abiertas
     if st.session_state.operaciones_activas:
         st.subheader("💼 Operaciones Abiertas")
         for op in st.session_state.operaciones_activas:
@@ -446,12 +430,12 @@ def main():
             color = "operacion-cerrada" if hist.get('ganancia_pct', 0) > 0 else "signal-sell"
             st.markdown(f"""
             <div class="{color}">
-                <b>{hist['symbol']}</b> | {hist['motivo']} |
+                <b>{hist['symbol']}</b> | {hist['motivo']}<br>
+                Entrada: {hist['entrada']:.4f} |
+                Cierre: {hist.get('cierre', 0):.4f} |
                 <span style="color:{'green' if hist.get('ganancia_pct', 0) > 0 else 'red'}">
                 {hist.get('ganancia_pct', 0):.2f}%
-                </span><br>
-                Entrada: {hist['entrada']:.4f} |
-                Cierre: {hist.get('cierre', 0):.4f}
+                </span>
             </div>
             """, unsafe_allow_html=True)
 
