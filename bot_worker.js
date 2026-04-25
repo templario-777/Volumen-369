@@ -273,29 +273,58 @@ async function runBot() {
 }
 
 async function getTopSymbols(topN) {
-  const resp = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
-    headers: { "User-Agent": "Mozilla/5.0" }
-  });
-  if (!resp.ok) {
-    const errorText = await resp.text();
-    throw new Error(`Binance API error: ${resp.status} - ${errorText}`);
+  // Intentar con diferentes subdominios de Binance si el principal falla
+  const endpoints = [
+    "https://api.binance.com/api/v3/ticker/24hr",
+    "https://api1.binance.com/api/v3/ticker/24hr",
+    "https://api2.binance.com/api/v3/ticker/24hr",
+    "https://api3.binance.com/api/v3/ticker/24hr"
+  ];
+
+  let lastError = null;
+  for (const url of endpoints) {
+    try {
+      const resp = await fetch(url, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+          "Accept": "application/json"
+        },
+        cf: { cacheTtl: 60 } // Cachear 1 minuto en Cloudflare para evitar spam
+      });
+
+      if (resp.ok) {
+        const data = await resp.json();
+        return data
+          .filter(t => t.symbol && t.symbol.endsWith("USDT"))
+          .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
+          .slice(0, topN)
+          .map(t => t.symbol);
+      }
+      lastError = `Binance ${new URL(url).hostname} error: ${resp.status}`;
+    } catch (e) {
+      lastError = e.message;
+    }
   }
-  const data = await resp.json();
-  return data
-    .filter(t => t.symbol && t.symbol.endsWith("USDT"))
-    .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-    .slice(0, topN)
-    .map(t => t.symbol);
+  throw new Error(lastError || "No se pudo conectar con ningún endpoint de Binance");
 }
 
 async function getKlines(symbol, interval, limit) {
-  try {
-    const resp = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
-    if (!resp.ok) return null;
-    return await resp.json();
-  } catch (e) {
-    return null;
+  const endpoints = [
+    `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+    `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
+    `https://api2.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const resp = await fetch(url, {
+        headers: { "User-Agent": "Mozilla/5.0" },
+        cf: { cacheTtl: 300 } // Cachear velas 5 min
+      });
+      if (resp.ok) return await resp.json();
+    } catch (e) {}
   }
+  return null;
 }
 
 function calculateIndicators(symbol, candles) {
