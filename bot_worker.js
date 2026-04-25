@@ -112,11 +112,25 @@ async function getProAnalysis(symbol) {
   else if (futures.funding < -0.01) phase = "POTENCIAL SHORT SQUEEZE";
   else if (futures.funding > 0.01) phase = "DISTRIBUCIÓN / RIESGO LONG";
 
-  // 5. Plan Cuantitativo ATR
+  // 5. Plan Cuantitativo ATR + Liquidez (Targeting Institucional)
   const atr14 = calculateATR(high, low, close, 14);
-  const sl = (lastPrice - (atr14 * 1.5)).toFixed(2);
-  const tp1 = (lastPrice + (atr14 * 2)).toFixed(2);
-  const tp2 = (lastPrice + (atr14 * 4)).toFixed(2);
+  const sl = (lastPrice - (atr14 * 2)).toFixed(symbol.includes("USDT") ? 2 : 4);
+  
+  // Targets dinámicos basados en zonas de liquidación (Imanes)
+  // TP1: Mitad de camino al imán o 2.5x ATR
+  // TP2: Justo en la zona de liquidación (Barrida)
+  let tp1, tp2;
+  if (cvdStatus === "BULLISH_ABSORPTION" || lastPrice > vwap) {
+    // Escenario Alcista: Apuntamos a liquidar Shorts (Arriba)
+    const liqTarget = lastPrice * 1.015; 
+    tp1 = (lastPrice + (atr14 * 3)).toFixed(symbol.includes("USDT") ? 2 : 4);
+    tp2 = liqTarget.toFixed(symbol.includes("USDT") ? 2 : 4);
+  } else {
+    // Escenario Bajista: Apuntamos a liquidar Longs (Abajo)
+    const liqTarget = lastPrice * 0.985;
+    tp1 = (lastPrice - (atr14 * 3)).toFixed(symbol.includes("USDT") ? 2 : 4);
+    tp2 = liqTarget.toFixed(symbol.includes("USDT") ? 2 : 4);
+  }
 
   return {
     symbol, price: lastPrice,
@@ -125,8 +139,8 @@ async function getProAnalysis(symbol) {
     oi: futures.oi.toLocaleString(),
     oiChange: futures.oiChange.toFixed(2) + "%",
     isSqueeze, phase, cvdStatus, session,
-    liqShorts: (lastPrice * 1.012).toFixed(2),
-    liqLongs: (lastPrice * 0.988).toFixed(2),
+    liqShorts: (lastPrice * 1.015).toFixed(2),
+    liqLongs: (lastPrice * 0.985).toFixed(2),
     plan: { entry: lastPrice, sl, tp1, tp2 },
     regime: isSqueeze ? "COMPRESIÓN (BOMBA)" : "FLUJO ACTIVO"
   };
@@ -206,12 +220,12 @@ async function handleDashboard() {
                 <div class="chart-container" id="tv_chart"></div>
                 <!-- PLAN CUANTITATIVO -->
                 <div class="card mt-4">
-                    <h6 class="metric-label">🎯 Plan de Gestión Institucional (ATR 2.0)</h6>
+                    <h6 class="metric-label">🎯 Plan Institucional (Targets en Imanes de Liquidez)</h6>
                     <div class="row text-center mt-3">
                         <div class="col-3"><div class="metric-label">ENTRADA</div><div id="planEntry" class="metric-sub">---</div></div>
                         <div class="col-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="SELL metric-sub">---</div></div>
-                        <div class="col-3"><div class="metric-label text-success">TAKE PROFIT 1</div><div id="planTP1" class="BUY metric-sub">---</div></div>
-                        <div class="col-3"><div class="metric-label text-success">TAKE PROFIT 2</div><div id="planTP2" class="BUY metric-sub">---</div></div>
+                        <div class="col-3"><div class="metric-label text-success">TARGET 1 (VOL)</div><div id="planTP1" class="BUY metric-sub">---</div></div>
+                        <div class="col-3"><div class="metric-label text-warning">TARGET 2 (LIQ)</div><div id="planTP2" class="metric-sub" style="color: #f0b90b;">---</div></div>
                     </div>
                 </div>
             </div>
