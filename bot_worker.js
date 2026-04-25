@@ -37,10 +37,27 @@ async function handleProxy(request, targetUrl) {
 }
 
 async function checkSymbolExists(symbol) {
+  symbol = symbol.toUpperCase();
+  // Intentar Binance Spot primero
   try {
-    const data = await fetchBinance(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`);
-    return !!data.symbol;
-  } catch (e) { return false; }
+    const data = await fetchBinance(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
+    if (data.symbol) return { exists: true, source: 'BINANCE' };
+  } catch (e) {}
+
+  // Intentar Binance Futuros
+  try {
+    const data = await fetchBinance(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`);
+    if (data.symbol) return { exists: true, source: 'BINANCE_FUTURES' };
+  } catch (e) {}
+
+  // Intentar Bybit (como alternativa para monedas que no están en Binance)
+  try {
+    const r = await fetch(`https://api.bybit.com/v5/market/tickers?category=spot&symbol=${symbol}`);
+    const data = await r.json();
+    if (data.result && data.result.list && data.result.list.length > 0) return { exists: true, source: 'BYBIT' };
+  } catch (e) {}
+
+  return { exists: false };
 }
 
 async function getProAnalysis(symbol) {
@@ -269,11 +286,30 @@ async function handleDashboard() {
         }
 
         async function updateSymbol() {
-            const input = document.getElementById('symbolInput').value.toUpperCase();
+            let input = document.getElementById('symbolInput').value.toUpperCase().trim();
             if(!input) return;
-            const res = await (await fetch(\`/api/check-symbol?symbol=\${input}\`)).json();
-            if(res.exists) { currentSymbol = input; initChart(input); loadData(); document.getElementById('symbolInput').value = ""; }
-            else { alert("Moneda no encontrada en Binance."); }
+            
+            // Auto-corrección: si solo ponen "BTC", convertir a "BTCUSDT"
+            if(!input.endsWith("USDT") && !input.endsWith("BUSD") && !input.endsWith("USDC")) {
+                input = input + "USDT";
+            }
+            
+            const sessionPill = document.getElementById('sessionPill');
+            sessionPill.innerText = "BUSCANDO: " + input + "...";
+
+            const check = await fetch(\`/api/check-symbol?symbol=\${input}\`);
+            const res = await check.json();
+            
+            if(res.exists) {
+                currentSymbol = input;
+                initChart(currentSymbol);
+                loadData();
+                document.getElementById('symbolInput').value = "";
+                sessionPill.innerText = "SESIÓN: ---"; // Se actualizará con loadData
+            } else {
+                alert("La moneda '" + input + "' no se encuentra en Binance Spot, Futuros ni Bybit. Asegúrate de escribir bien el símbolo (ej: PEPE, SOL, ARB).");
+                sessionPill.innerText = "MONEDA NO ENCONTRADA";
+            }
         }
 
         async function loadData() {
