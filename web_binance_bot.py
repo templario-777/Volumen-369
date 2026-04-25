@@ -87,12 +87,19 @@ def crear_exchange():
 
         # Agregar proxy si está configurado
         proxy_url = st.secrets.get("PROXY_URL", "")
+        if not proxy_url:
+            # Buscar en inputs de UI
+            proxy_url = st.session_state.get('proxy_input', "")
+
         if proxy_url:
+            # Validar formato
+            if not proxy_url.startswith("http"):
+                proxy_url = "http://" + proxy_url
             config['proxies'] = {
                 'http': proxy_url,
                 'https': proxy_url,
             }
-            st.sidebar.info(f"🔗 Usando proxy")
+            st.sidebar.success(f"🔗 Proxy: {proxy_url[:30]}...")
 
         exchange = ccxt.binance(config)
 
@@ -338,8 +345,12 @@ def main():
         capital_usd = st.number_input("USD por operación", 10.0, 1000.0, 50.0)
         usar_telegram = st.checkbox("Activar alertas Telegram", value=True)
 
+        st.subheader("🌐 Proxy (para Error 451)")
+        proxy_input = st.text_input("Proxy URL (ej: http://ip:puerto)", type="password", key="proxy_sb")
+        st.session_state.proxy_input = proxy_input
+
         st.markdown("---")
-        st.caption("💡 Configura PROXY_URL en Secrets si hay error 451")
+        st.caption("💡 Si hay Error 451, usa un proxy de EE.UU. o Europa")
 
     # Conectar
     exchange = crear_exchange()
