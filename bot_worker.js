@@ -15,10 +15,156 @@ addEventListener("fetch", event => {
     event.respondWith(handleProxy(event.request, targetUrl));
   } else if (url.pathname === "/run") {
     event.respondWith(handleManualRun());
+  } else if (url.pathname === "/api/status") {
+    event.respondWith(handleStatus());
   } else {
-    event.respondWith(new Response("Bot Volumen-369 activo (vía Cron)."));
+    event.respondWith(handleDashboard());
   }
 });
+
+async function handleDashboard() {
+  const html = `
+  <!DOCTYPE html>
+  <html lang="es">
+  <head>
+      <meta charset="UTF-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <title>Volumen-369 Bot Dashboard</title>
+      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+      <style>
+          body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
+          .card { background-color: #1e293b; border: none; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+          .status-active { color: #10b981; font-weight: bold; }
+          .signal-buy { background-color: #065f46; color: #34d399; padding: 4px 8px; border-radius: 6px; font-size: 0.85rem; }
+          .signal-sell { background-color: #7f1d1d; color: #f87171; padding: 4px 8px; border-radius: 6px; font-size: 0.85rem; }
+          .signal-hold { color: #94a3b8; font-size: 0.85rem; }
+          .table { color: #f8fafc; }
+          .table th { border-bottom: 2px solid #334155; }
+          .table td { border-bottom: 1px solid #334155; vertical-align: middle; }
+          .btn-primary { background-color: #3b82f6; border: none; }
+          .btn-primary:hover { background-color: #2563eb; }
+          .loader { border: 3px solid #334155; border-top: 3px solid #3b82f6; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-right: 10px; }
+          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+      </style>
+  </head>
+  <body>
+      <div class="container py-5">
+          <div class="d-flex justify-content-between align-items-center mb-4">
+              <div>
+                  <h1 class="h3 mb-1">🚀 Volumen-369 Bot</h1>
+                  <p class="text-secondary mb-0">Estado: <span class="status-active">● Activo (vía Cron)</span></p>
+              </div>
+              <button onclick="runBot()" id="runBtn" class="btn btn-primary">Ejecutar Escaneo Ahora</button>
+          </div>
+
+          <div class="card p-4">
+              <h5 class="mb-4">Mercados en Tiempo Real (Top 10 USDT)</h5>
+              <div class="table-responsive">
+                  <table class="table">
+                      <thead>
+                          <tr>
+                              <th>Símbolo</th>
+                              <th>Precio</th>
+                              <th>RVOL (24h)</th>
+                              <th>Tendencia SMA</th>
+                              <th>Señal</th>
+                          </tr>
+                      </thead>
+                      <tbody id="market-data">
+                          <tr><td colspan="5" class="text-center py-4"><div class="loader"></div> Cargando datos de mercado...</td></tr>
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+      </div>
+
+      <script>
+          async function loadStatus() {
+              try {
+                  const resp = await fetch('/api/status');
+                  const data = await resp.json();
+                  const tbody = document.getElementById('market-data');
+                  tbody.innerHTML = '';
+
+                  data.forEach(item => {
+                      const trend = item.sma50 > item.sma200 ? '📈 Alcista' : '📉 Bajista';
+                      let signalClass = 'signal-hold';
+                      let signalText = 'HOLD';
+                      
+                      if (item.signal === 'BUY') { signalClass = 'signal-buy'; signalText = 'COMPRA 🚀'; }
+                      else if (item.signal === 'SELL') { signalClass = 'signal-sell'; signalText = 'VENTA 📉'; }
+
+                      tbody.innerHTML += \`
+                          <tr>
+                              <td><strong>\${item.symbol}</strong></td>
+                              <td>\${item.price.toFixed(4)}</td>
+                              <td>\${item.rvol.toFixed(2)}x</td>
+                              <td>\${trend}</td>
+                              <td><span class="\${signalClass}">\${signalText}</span></td>
+                          </tr>
+                      \`;
+                  });
+              } catch (e) {
+                  console.error(e);
+              }
+          }
+
+          async function runBot() {
+              const btn = document.getElementById('runBtn');
+              btn.disabled = true;
+              btn.innerHTML = '<div class="loader"></div> Ejecutando...';
+              try {
+                  const resp = await fetch('/run');
+                  const text = await resp.text();
+                  alert(text);
+              } catch (e) {
+                  alert('Error al ejecutar: ' + e.message);
+              }
+              btn.disabled = false;
+              btn.innerHTML = 'Ejecutar Escaneo Ahora';
+              loadStatus();
+          }
+
+          loadStatus();
+          setInterval(loadStatus, 30000);
+      </script>
+  </body>
+  </html>
+  `;
+  return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
+}
+
+async function handleStatus() {
+  const config = {
+    TOP_N: typeof globalThis.TOP_N !== 'undefined' ? parseInt(globalThis.TOP_N) : 10,
+  };
+  
+  const symbols = await getTopSymbols(config.TOP_N);
+  const statusData = [];
+
+  for (const symbol of symbols) {
+    try {
+      const candles = await getKlines(symbol, '5m', 200);
+      if (!candles || candles.length < 200) continue;
+
+      const indicators = calculateIndicators(symbol, candles);
+      const signal = detectPattern(indicators);
+
+      statusData.push({
+        symbol: symbol,
+        price: indicators.close,
+        rvol: indicators.rvol,
+        sma50: indicators.sma50,
+        sma200: indicators.sma200,
+        signal: signal.patron
+      });
+    } catch (e) {}
+  }
+
+  return new Response(JSON.stringify(statusData), {
+    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+  });
+}
 
 async function handleProxy(request, targetUrl) {
   try {
