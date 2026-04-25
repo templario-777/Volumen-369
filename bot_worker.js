@@ -1,6 +1,6 @@
 /**
- * 🚀 Volumen-369 Trading Bot - Versión ELITE V3 "CONFLUENCIA MACRO"
- * Análisis Multi-Timeframe (15m, 1h, 4h, 1d) + Motor de Sentimiento Avanzado.
+ * 🚀 Volumen-369 Trading Bot - Versión ELITE V4 "LIQUIDITY HUNTER"
+ * Caza de barridas de volumen, rebotes en imanes y visibilidad ultra-alta.
  */
 
 async function handleRequest(request) {
@@ -47,7 +47,6 @@ async function checkSymbolExists(symbol) {
 async function getProAnalysis(symbol) {
   symbol = symbol.toUpperCase();
   
-  // 1. Obtención de Datos Multi-Timeframe (MTF)
   const [c15m, c1h, c4h, c1d] = await Promise.all([
     fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=100`),
     fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=100`),
@@ -55,7 +54,6 @@ async function getProAnalysis(symbol) {
     fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=50`)
   ]);
 
-  // 2. Datos de Futuros y Sentimiento
   let futures = { funding: 0, oi: 0, oiChange: 0 };
   try {
     const fTicker = await fetchBinance(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`);
@@ -68,12 +66,11 @@ async function getProAnalysis(symbol) {
     }
   } catch(e) {}
 
-  // 3. Análisis de Tendencia MTF (SMA 50/200)
   const getBias = (candles) => {
     const close = candles.map(c => parseFloat(c[4]));
     const sma50 = close.slice(-50).reduce((a,b)=>a+b,0) / 50;
     const sma200 = close.slice(-100).reduce((a,b)=>a+b,0) / 100;
-    return close[close.length-1] > sma50 && sma50 > sma200 ? "ALCISTA" : (close[close.length-1] < sma50 && sma50 < sma200 ? "BAJISTA" : "NEUTRAL");
+    return close[close.length-1] > sma50 ? "ALCISTA" : "BAJISTA";
   };
 
   const bias15m = getBias(c15m);
@@ -81,42 +78,42 @@ async function getProAnalysis(symbol) {
   const bias4h = getBias(c4h);
   const bias1d = getBias(c1d);
 
-  // 4. Confluencia y Fuerza del Sentimiento
-  let score = 0;
-  if (bias15m === bias1h) score += 20;
-  if (bias1h === bias4h) score += 30;
-  if (bias4h === bias1d) score += 20;
-  if (futures.oiChange > 0.5) score += 15;
-  if (Math.abs(futures.funding) > 0.01) score += 15;
-
   const lastPrice = parseFloat(c15m[c15m.length-1][4]);
   const atr15m = calculateATR(c15m.map(c=>parseFloat(c[2])), c15m.map(c=>parseFloat(c[3])), c15m.map(c=>parseFloat(c[4])), 14);
 
-  // 5. Motor de Sentimiento Refinado
-  let sentiment = "NEUTRAL";
-  if (score >= 70) sentiment = "EXTREMADAMENTE FUERTE";
-  else if (score >= 40) sentiment = "MODERADO";
-  else sentiment = "DÉBIL / RIESGO";
+  // LÓGICA DE BARRIDA Y REBOTE (LIQUIDITY HUNTER)
+  const liqShorts = lastPrice * 1.025; // Imán superior
+  const liqLongs = lastPrice * 0.975;  // Imán inferior
+  
+  let idea = "ESPERAR BARRIDA";
+  let tp1, tp2, sl;
 
-  // 6. Plan Institucional alineado a la Liquidez
-  const liqShorts = (lastPrice * 1.02).toFixed(2);
-  const liqLongs = (lastPrice * 0.98).toFixed(2);
+  if (bias1d === "ALCISTA") {
+    // Si la tendencia macro es alcista, buscamos que el precio caiga a liquidar LONGs para comprar el rebote
+    idea = "COMPRAR REBOTE EN LIQ LONGS";
+    sl = (liqLongs * 0.99).toFixed(symbol.includes("USDT") ? 2 : 5);
+    tp1 = lastPrice.toFixed(symbol.includes("USDT") ? 2 : 5);
+    tp2 = liqShorts.toFixed(symbol.includes("USDT") ? 2 : 5);
+  } else {
+    // Si la tendencia macro es bajista, buscamos que el precio suba a liquidar SHORTs para vender la caída
+    idea = "VENDER RECHAZO EN LIQ SHORTS";
+    sl = (liqShorts * 1.01).toFixed(symbol.includes("USDT") ? 2 : 5);
+    tp1 = lastPrice.toFixed(symbol.includes("USDT") ? 2 : 5);
+    tp2 = liqLongs.toFixed(symbol.includes("USDT") ? 2 : 5);
+  }
 
   return {
     symbol, price: lastPrice,
     mtf: { "15m": bias15m, "1h": bias1h, "4h": bias4h, "1d": bias1d },
-    confluence: score + "%",
-    sentiment,
+    confluence: (bias15m === bias1h && bias1h === bias4h ? "ALTA" : "BAJA"),
+    sentiment: futures.funding < 0 ? "MIEDO (Oportunidad Long)" : "EUFORIA (Oportunidad Short)",
     funding: (futures.funding * 100).toFixed(4) + "%",
     oi: futures.oi.toLocaleString(),
     oiChange: futures.oiChange.toFixed(2) + "%",
-    liqShorts, liqLongs,
-    plan: {
-      entry: lastPrice,
-      sl: (lastPrice - (atr15m * 2)).toFixed(2),
-      tp1: (lastPrice + (atr15m * 3)).toFixed(2),
-      tp2: (score > 60 ? (bias1h === "ALCISTA" ? liqShorts : liqLongs) : (lastPrice + (atr15m * 5)).toFixed(2))
-    }
+    liqShorts: liqShorts.toFixed(symbol.includes("USDT") ? 2 : 5),
+    liqLongs: liqLongs.toFixed(symbol.includes("USDT") ? 2 : 5),
+    idea,
+    plan: { entry: lastPrice.toFixed(symbol.includes("USDT") ? 2 : 5), sl, tp1, tp2 }
   };
 }
 
@@ -130,7 +127,7 @@ function calculateATR(h, l, c, p) {
 
 async function fetchBinance(url) {
   const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-  if (!r.ok) throw new Error(`Binance API Error`);
+  if (!r.ok) throw new Error(`API Error`);
   return await r.json();
 }
 
@@ -140,47 +137,63 @@ async function handleDashboard() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Volumen-369 ELITE V3</title>
+    <title>Volumen-369 V4 HUNTER</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        :root { --bg: #0b0e11; --card: #1e2329; --yellow: #f0b90b; --green: #0ecb81; --red: #f6465d; --text: #ffffff; --muted: #b7bdc6; }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; }
-        .card { background: var(--card); border: 1px solid #474d57; border-radius: 12px; padding: 20px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); }
-        .metric-label { color: var(--muted); font-size: 0.75rem; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
-        .metric-value { font-size: 1.6rem; font-weight: 900; color: var(--yellow); }
-        .bias-pill { padding: 4px 10px; border-radius: 6px; font-size: 0.7rem; font-weight: 800; margin-right: 5px; }
-        .ALCISTA { background: rgba(14, 203, 129, 0.2); color: var(--green); }
-        .BAJISTA { background: rgba(246, 70, 93, 0.2); color: var(--red); }
-        .NEUTRAL { background: #2b3139; color: var(--muted); }
-        .chart-container { height: 500px; border-radius: 12px; overflow: hidden; border: 1px solid #474d57; }
-        .search-box { background: #2b3139; border: 2px solid #474d57; color: #fff; padding: 10px 20px; border-radius: 30px; width: 300px; font-weight: 700; }
+        :root { --bg: #0b0e11; --card: #1e2329; --yellow: #f0b90b; --green: #0ecb81; --red: #f6465d; --text: #ffffff; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-weight: 700; }
+        .card { background: var(--card); border: 2px solid #474d57; border-radius: 15px; padding: 25px; box-shadow: 0 10px 20px rgba(0,0,0,0.6); }
+        
+        /* VISIBILIDAD ULTRA ALTA */
+        .metric-label { color: #b7bdc6; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 5px; }
+        .metric-value { font-size: 2.2rem; font-weight: 900; color: var(--yellow); text-shadow: 0 0 10px rgba(240, 185, 11, 0.3); }
+        .plan-val { font-size: 1.8rem; font-weight: 900; color: #fff; }
+        
+        .BUY, .ALCISTA { color: var(--green) !important; }
+        .SELL, .BAJISTA { color: var(--red) !important; }
+        
+        .bias-pill { padding: 8px 15px; border-radius: 10px; font-size: 0.8rem; border: 2px solid transparent; }
+        .ALCISTA-P { background: rgba(14, 203, 129, 0.2); border-color: var(--green); color: var(--green); }
+        .BAJISTA-P { background: rgba(246, 70, 93, 0.2); border-color: var(--red); color: var(--red); }
+        
+        .search-box { background: #2b3139; border: 3px solid var(--yellow); color: #fff; padding: 15px 25px; border-radius: 50px; width: 400px; font-size: 1.2rem; outline: none; }
+        .liq-zone { padding: 20px; border-radius: 15px; margin-top: 15px; border: 3px solid; }
+        .liq-shorts { background: rgba(14, 203, 129, 0.1); border-color: var(--green); }
+        .liq-longs { background: rgba(246, 70, 93, 0.1); border-color: var(--red); }
+        
+        .chart-container { height: 550px; border-radius: 15px; overflow: hidden; border: 2px solid #474d57; }
+        #idea-pill { background: var(--yellow); color: #000; padding: 10px 20px; border-radius: 10px; display: inline-block; margin-top: 10px; font-size: 1.1rem; }
     </style>
 </head>
 <body>
     <div class="container-fluid p-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h3 class="m-0 fw-bold">🚀 Volumen-369 <span class="badge bg-warning text-dark" style="font-size: 0.5em;">V3 CONFLUENCIA</span></h3>
-            <div class="d-flex gap-3 align-items-center">
-                <div id="mtf-panel" class="d-flex">
-                    <span class="bias-pill" id="b15m">15M: --</span>
-                    <span class="bias-pill" id="b1h">1H: --</span>
-                    <span class="bias-pill" id="b4h">4H: --</span>
-                    <span class="bias-pill" id="b1d">1D: --</span>
+            <h2 class="m-0 fw-bold">🚀 Volumen-369 <span class="badge bg-warning text-dark">V4 HUNTER</span></h2>
+            <div class="d-flex gap-3">
+                <div id="mtf-panel" class="d-flex gap-2">
+                    <span id="b15m" class="bias-pill">15M: --</span>
+                    <span id="b1h" class="bias-pill">1H: --</span>
+                    <span id="b4h" class="bias-pill">4H: --</span>
+                    <span id="b1d" class="bias-pill">1D: --</span>
                 </div>
-                <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO..." onkeypress="if(event.key==='Enter') updateSymbol()">
+                <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO (BTC, SOL...)" onkeypress="if(event.key==='Enter') updateSymbol()">
             </div>
         </div>
 
         <div class="row g-4">
             <div class="col-lg-8">
                 <div class="chart-container" id="tv_chart"></div>
+                <!-- PLAN OPERATIVO -->
                 <div class="card mt-4">
-                    <h6 class="metric-label">🎯 Plan Algorítmico (Confirmación MTF)</h6>
-                    <div class="row text-center mt-3">
-                        <div class="col-3"><div class="metric-label">ENTRADA</div><div id="planEntry" class="fw-bold">---</div></div>
-                        <div class="col-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="fw-bold text-danger">---</div></div>
-                        <div class="col-3"><div class="metric-label text-success">TARGET 1</div><div id="planTP1" class="fw-bold text-success">---</div></div>
-                        <div class="col-3"><div class="metric-label text-warning">TARGET 2 (LIQ)</div><div id="planTP2" class="fw-bold text-warning">---</div></div>
+                    <div class="d-flex justify-content-between">
+                        <h4 class="metric-label">🎯 PLAN DE REBOTE INSTITUCIONAL</h4>
+                        <div id="idea-pill">ESPERANDO SEÑAL...</div>
+                    </div>
+                    <div class="row text-center mt-4">
+                        <div class="col-3"><div class="metric-label">ENTRADA</div><div id="planEntry" class="plan-val">---</div></div>
+                        <div class="col-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="SELL plan-val">---</div></div>
+                        <div class="col-3"><div class="metric-label text-success">TARGET 1</div><div id="planTP1" class="BUY plan-val">---</div></div>
+                        <div class="col-3"><div class="metric-label text-warning">TARGET 2 (BARRIDA)</div><div id="planTP2" class="plan-val" style="color: var(--yellow);">---</div></div>
                     </div>
                 </div>
             </div>
@@ -189,30 +202,23 @@ async function handleDashboard() {
                 <div class="row g-4">
                     <div class="col-12">
                         <div class="card">
-                            <div class="metric-label">SENTIMIENTO / CONFLUENCIA</div>
-                            <div id="confluence" class="metric-value">---</div>
-                            <div id="sentiment" class="fw-bold mt-1">---</div>
+                            <div class="metric-label">PRECIO <span id="curSymbol" class="text-white">BTCUSDT</span></div>
+                            <div id="price" class="metric-value">---</div>
+                            <hr>
+                            <div class="metric-label">SENTIMIENTO DE MERCADO</div>
+                            <div id="sentiment" class="h4">---</div>
                         </div>
                     </div>
                     <div class="col-12">
                         <div class="card">
-                            <h6 class="metric-label">FUTUROS (SMART MONEY)</h6>
-                            <div class="row mt-2">
-                                <div class="col-6"><div class="metric-label">FUNDING</div><div id="funding" class="fw-bold">---</div></div>
-                                <div class="col-6"><div class="metric-label">CAMBIO OI</div><div id="oiChange" class="fw-bold">---</div></div>
+                            <h5 class="metric-label">IMANES DE LIQUIDACIÓN (TARGETS)</h5>
+                            <div class="liq-zone liq-shorts">
+                                <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (ARRIBA)</div>
+                                <div id="liqShorts" class="BUY h3 m-0">---</div>
                             </div>
-                        </div>
-                    </div>
-                    <div class="col-12">
-                        <div class="card">
-                            <h6 class="metric-label">ZONAS DE LIQUIDEZ (IMANES)</h6>
-                            <div class="mt-2 p-3 rounded" style="background: rgba(14, 203, 129, 0.1); border-left: 4px solid var(--green);">
-                                <div class="metric-label text-success">LIQ SHORTS</div>
-                                <div id="liqShorts" class="fw-bold">---</div>
-                            </div>
-                            <div class="mt-2 p-3 rounded" style="background: rgba(246, 70, 93, 0.1); border-left: 4px solid var(--red);">
-                                <div class="metric-label text-danger">LIQ LONGS</div>
-                                <div id="liqLongs" class="fw-bold">---</div>
+                            <div class="liq-zone liq-longs">
+                                <div class="metric-label text-danger">LIQUIDACIÓN DE LONGS (ABAJO)</div>
+                                <div id="liqLongs" class="SELL h3 m-0">---</div>
                             </div>
                         </div>
                     </div>
@@ -232,37 +238,36 @@ async function handleDashboard() {
         }
 
         async function updateSymbol() {
-            const input = document.getElementById('symbolInput').value.toUpperCase().trim();
+            let input = document.getElementById('symbolInput').value.toUpperCase().trim();
             if(!input) return;
-            const s = input.endsWith("USDT") ? input : input + "USDT";
-            const check = await (await fetch(\`/api/check-symbol?symbol=\${s}\`)).json();
-            if(check.exists) { currentSymbol = s; initChart(s); loadData(); document.getElementById('symbolInput').value = ""; }
+            if(!input.endsWith("USDT")) input += "USDT";
+            const res = await (await fetch(\`/api/check-symbol?symbol=\${input}\`)).json();
+            if(res.exists) { currentSymbol = input; initChart(input); loadData(); document.getElementById('symbolInput').value = ""; }
             else { alert("Moneda no encontrada."); }
         }
 
         async function loadData() {
             const d = await (await fetch(\`/api/pro-analysis?symbol=\${currentSymbol}\`)).json();
-            document.getElementById('confluence').innerText = d.confluence;
+            document.getElementById('price').innerText = d.price.toLocaleString();
+            document.getElementById('curSymbol').innerText = d.symbol;
             document.getElementById('sentiment').innerText = d.sentiment;
-            document.getElementById('funding').innerText = d.funding;
-            document.getElementById('oiChange').innerText = d.oiChange;
             document.getElementById('liqShorts').innerText = d.liqShorts;
             document.getElementById('liqLongs').innerText = d.liqLongs;
-            document.getElementById('planEntry').innerText = d.plan.entry.toLocaleString();
+            document.getElementById('idea-pill').innerText = d.idea;
+            document.getElementById('planEntry').innerText = d.plan.entry;
             document.getElementById('planSL').innerText = d.plan.sl;
             document.getElementById('planTP1').innerText = d.plan.tp1;
             document.getElementById('planTP2').innerText = d.plan.tp2;
 
-            // Update MTF Pills
-            const timeframes = ["15m", "1h", "4h", "1d"];
-            timeframes.forEach(tf => {
+            const tfs = ["15m", "1h", "4h", "1d"];
+            tfs.forEach(tf => {
                 const el = document.getElementById('b' + tf);
                 el.innerText = tf.toUpperCase() + ": " + d.mtf[tf];
-                el.className = "bias-pill " + d.mtf[tf];
+                el.className = "bias-pill " + d.mtf[tf] + "-P";
             });
         }
 
-        initChart(currentSymbol); loadData(); setInterval(loadData, 20000);
+        initChart(currentSymbol); loadData(); setInterval(loadData, 15000);
     </script>
 </body>
 </html>`;
