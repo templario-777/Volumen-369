@@ -1,373 +1,275 @@
 /**
- * 🚀 Volumen-369 Trading Bot - Cloudflare Worker Edition
- * Autónomo, 24/7, con Dashboard HTML moderno.
+ * 🚀 Volumen-369 Trading Bot - Cloudflare Worker
+ * Versión Ultra-Estable
  */
 
-// Listener para peticiones Web (Dashboard, Proxy, etc)
-addEventListener("fetch", event => {
-  event.respondWith(
-    handleRequest(event.request).catch(err => {
-      return new Response(JSON.stringify({ 
-        error: "Worker Runtime Error", 
-        message: err.message,
-        stack: err.stack 
-      }), { 
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      });
-    })
-  );
-});
+// --- CONFIGURACIÓN POR DEFECTO ---
+const DEFAULT_TOP_N = 10;
+const DEFAULT_USD_PER_TRADE = 50;
 
-// Listener para ejecución automática (Cron)
-addEventListener("scheduled", event => {
-  event.waitUntil(
-    runBot().catch(err => console.error("Error en cron:", err))
-  );
-});
-
+// --- GESTIÓN DE PETICIONES ---
 async function handleRequest(request) {
   const url = new URL(request.url);
-  const targetUrl = url.searchParams.get("target");
+  
+  // Endpoint de prueba rápido
+  if (url.pathname === "/ping") {
+    return new Response("pong", { status: 200 });
+  }
 
+  // Lógica de Proxy
+  const targetUrl = url.searchParams.get("target");
   if (targetUrl) {
     return await handleProxy(request, targetUrl);
-  } else if (url.pathname === "/run") {
-    return await handleManualRun();
-  } else if (url.pathname === "/api/status") {
-    return await handleStatus();
-  } else {
-    return await handleDashboard();
   }
-}
 
-async function handleDashboard() {
-  const html = `
-  <!DOCTYPE html>
-  <html lang="es">
-  <head>
-      <meta charset="UTF-8">
-      <meta name="viewport" content="width=device-width, initial-scale=1.0">
-      <title>Volumen-369 Bot Dashboard</title>
-      <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
-      <style>
-          body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
-          .card { background-color: #1e293b; border: none; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
-          .status-active { color: #10b981; font-weight: bold; }
-          .signal-buy { background-color: #065f46; color: #34d399; padding: 4px 8px; border-radius: 6px; font-size: 0.85rem; }
-          .signal-sell { background-color: #7f1d1d; color: #f87171; padding: 4px 8px; border-radius: 6px; font-size: 0.85rem; }
-          .signal-hold { color: #94a3b8; font-size: 0.85rem; }
-          .table { color: #f8fafc; }
-          .table th { border-bottom: 2px solid #334155; }
-          .table td { border-bottom: 1px solid #334155; vertical-align: middle; }
-          .btn-primary { background-color: #3b82f6; border: none; }
-          .btn-primary:hover { background-color: #2563eb; }
-          .loader { border: 3px solid #334155; border-top: 3px solid #3b82f6; border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; display: inline-block; margin-right: 10px; }
-          @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
-      </style>
-  </head>
-  <body>
-      <div class="container py-5">
-          <div class="d-flex justify-content-between align-items-center mb-4">
-              <div>
-                  <h1 class="h3 mb-1">🚀 Volumen-369 Bot</h1>
-                  <p class="text-secondary mb-0">Estado: <span class="status-active">● Activo (vía Cron)</span></p>
-              </div>
-              <button onclick="runBot()" id="runBtn" class="btn btn-primary">Ejecutar Escaneo Ahora</button>
-          </div>
-
-          <div class="card p-4">
-              <h5 class="mb-4">Mercados en Tiempo Real (Top 10 USDT)</h5>
-              <div class="table-responsive">
-                  <table class="table">
-                      <thead>
-                          <tr>
-                              <th>Símbolo</th>
-                              <th>Precio</th>
-                              <th>RVOL (24h)</th>
-                              <th>Tendencia SMA</th>
-                              <th>Señal</th>
-                          </tr>
-                      </thead>
-                      <tbody id="market-data">
-                          <tr><td colspan="5" class="text-center py-4"><div class="loader"></div> Cargando datos de mercado...</td></tr>
-                      </tbody>
-                  </table>
-              </div>
-          </div>
-      </div>
-
-      <script>
-          async function loadStatus() {
-              try {
-                  const resp = await fetch('/api/status');
-                  const data = await resp.json();
-                  
-                  if (data.error) {
-                      document.getElementById('market-data').innerHTML = \`
-                          <tr><td colspan="5" class="text-center text-danger py-4">
-                              ❌ Error de Binance: \${data.message}<br>
-                              <small>Es posible que Cloudflare esté bloqueado temporalmente por Binance o falten permisos.</small>
-                          </td></tr>
-                      \`;
-                      return;
-                  }
-
-                  const tbody = document.getElementById('market-data');
-                  tbody.innerHTML = '';
-
-                  data.forEach(item => {
-                      const trend = item.sma50 > item.sma200 ? '📈 Alcista' : '📉 Bajista';
-                      let signalClass = 'signal-hold';
-                      let signalText = 'HOLD';
-                      
-                      if (item.signal === 'BUY') { signalClass = 'signal-buy'; signalText = 'COMPRA 🚀'; }
-                      else if (item.signal === 'SELL') { signalClass = 'signal-sell'; signalText = 'VENTA 📉'; }
-
-                      tbody.innerHTML += \`
-                          <tr>
-                              <td><strong>\${item.symbol}</strong></td>
-                              <td>\${item.price.toFixed(4)}</td>
-                              <td>\${item.rvol.toFixed(2)}x</td>
-                              <td>\${trend}</td>
-                              <td><span class="\${signalClass}">\${signalText}</span></td>
-                          </tr>
-                      \`;
-                  });
-              } catch (e) {
-                  console.error(e);
-              }
-          }
-
-          async function runBot() {
-              const btn = document.getElementById('runBtn');
-              btn.disabled = true;
-              btn.innerHTML = '<div class="loader"></div> Ejecutando...';
-              try {
-                  const resp = await fetch('/run');
-                  const text = await resp.text();
-                  alert(text);
-              } catch (e) {
-                  alert('Error al ejecutar: ' + e.message);
-              }
-              btn.disabled = false;
-              btn.innerHTML = 'Ejecutar Escaneo Ahora';
-              loadStatus();
-          }
-
-          loadStatus();
-          setInterval(loadStatus, 30000);
-      </script>
-  </body>
-  </html>
-  `;
-  return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
-}
-
-async function handleStatus() {
+  // Endpoints de API y Dashboard
   try {
-    const topN = typeof TOP_N !== 'undefined' ? parseInt(TOP_N) : 10;
-    const symbols = await getTopSymbols(topN);
-    const statusData = [];
-
-    for (const symbol of symbols) {
-      try {
-        const candles = await getKlines(symbol, '5m', 200);
-        if (!candles || candles.length < 200) continue;
-
-        const indicators = calculateIndicators(symbol, candles);
-        const signal = detectPattern(indicators);
-
-        statusData.push({
-          symbol: symbol,
-          price: indicators.close,
-          rvol: indicators.rvol,
-          sma50: indicators.sma50,
-          sma200: indicators.sma200,
-          signal: signal.patron
-        });
-      } catch (e) {}
+    if (url.pathname === "/api/status") {
+      return await handleStatus();
+    } else if (url.pathname === "/run") {
+      return await handleManualRun();
+    } else if (url.pathname === "/" || url.pathname === "") {
+      return await handleDashboard();
     }
-
-    return new Response(JSON.stringify(statusData), {
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
-    });
+    
+    return new Response("Not Found", { status: 404 });
   } catch (err) {
-    return new Response(JSON.stringify({ error: true, message: err.message }), {
-      status: 500,
-      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+    return new Response(JSON.stringify({
+      error: "Runtime Error",
+      message: err.message
+    }), { 
+      status: 500, 
+      headers: { "Content-Type": "application/json" } 
     });
   }
 }
+
+// --- HANDLERS ---
 
 async function handleProxy(request, targetUrl) {
   try {
     const url = new URL(targetUrl);
-    const proxyRequest = new Request(url, {
+    const headers = new Headers(request.headers);
+    headers.delete("Host");
+    headers.delete("cf-connecting-ip");
+    headers.delete("cf-ipcountry");
+    headers.delete("cf-ray");
+    headers.delete("cf-visitor");
+
+    const response = await fetch(url.toString(), {
       method: request.method,
-      headers: new Headers(request.headers),
+      headers: headers,
       body: request.method !== 'GET' && request.method !== 'HEAD' ? await request.arrayBuffer() : null,
       redirect: 'follow'
     });
 
-    proxyRequest.headers.delete("Host");
-    proxyRequest.headers.delete("cf-connecting-ip");
-    proxyRequest.headers.delete("cf-ipcountry");
-    proxyRequest.headers.delete("cf-ray");
-    proxyRequest.headers.delete("cf-visitor");
-
-    const response = await fetch(proxyRequest);
-    const responseHeaders = new Headers(response.headers);
-    responseHeaders.set("Access-Control-Allow-Origin", "*");
-    responseHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-    responseHeaders.set("Access-Control-Allow-Headers", "*");
-
+    const newHeaders = new Headers(response.headers);
+    newHeaders.set("Access-Control-Allow-Origin", "*");
+    newHeaders.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+    
     return new Response(response.body, {
       status: response.status,
       statusText: response.statusText,
-      headers: responseHeaders
+      headers: newHeaders
     });
   } catch (err) {
-    return new Response(JSON.stringify({ error: "Proxy Error", message: err.message }), { 
-      status: 500,
-      headers: { "Content-Type": "application/json" }
+    return new Response("Proxy Error: " + err.message, { status: 500 });
+  }
+}
+
+async function handleStatus() {
+  const topN = getEnvVar("TOP_N", DEFAULT_TOP_N);
+  try {
+    const symbols = await getTopSymbols(topN);
+    const data = [];
+    for (const symbol of symbols) {
+      try {
+        const klines = await getKlines(symbol, '5m', 200);
+        if (klines && klines.length >= 200) {
+          const indicators = calculateIndicators(symbol, klines);
+          const signal = detectPattern(indicators);
+          data.push({
+            symbol,
+            price: indicators.close,
+            rvol: indicators.rvol,
+            sma50: indicators.sma50,
+            sma200: indicators.sma200,
+            signal: signal.patron
+          });
+        }
+      } catch (e) {}
+    }
+    return new Response(JSON.stringify(data), {
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
     });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: true, message: err.message }), { status: 500 });
   }
 }
 
 async function handleManualRun() {
-  await runBot();
-  return new Response("Bot ejecutado correctamente. Revisa tu Telegram.");
+  try {
+    await runBot();
+    return new Response("Escaneo completado. Revisa Telegram.");
+  } catch (err) {
+    return new Response("Error: " + err.message, { status: 500 });
+  }
 }
 
+async function handleDashboard() {
+  const html = `<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Dashboard Volumen-369</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body { background: #0f172a; color: #fff; font-family: sans-serif; padding: 20px; }
+        .card { background: #1e293b; border: none; padding: 20px; border-radius: 10px; }
+        .buy { color: #10b981; font-weight: bold; }
+        .sell { color: #f43f5e; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="d-flex justify-content-between mb-4">
+            <h1>🚀 Bot Volumen-369</h1>
+            <button onclick="runNow()" class="btn btn-primary">Escanear Ahora</button>
+        </div>
+        <div class="card">
+            <table class="table table-dark">
+                <thead>
+                    <tr><th>Símbolo</th><th>Precio</th><th>RVOL</th><th>Señal</th></tr>
+                </thead>
+                <tbody id="data"><tr><td colspan="4">Cargando...</td></tr></tbody>
+            </table>
+        </div>
+    </div>
+    <script>
+        async function load() {
+            try {
+                const r = await fetch('/api/status');
+                const d = await r.json();
+                if (d.error) throw new Error(d.message);
+                const b = document.getElementById('data');
+                b.innerHTML = d.map(i => \`
+                    <tr>
+                        <td>\${i.symbol}</td>
+                        <td>\${i.price.toFixed(4)}</td>
+                        <td>\${i.rvol.toFixed(2)}x</td>
+                        <td class="\${i.signal.toLowerCase()}">\${i.signal}</td>
+                    </tr>
+                \`).join('');
+            } catch(e) { document.getElementById('data').innerHTML = '<tr><td colspan="4">Error: '+e.message+'</td></tr>'; }
+        }
+        async function runNow() {
+            alert(await (await fetch('/run')).text());
+            load();
+        }
+        load();
+        setInterval(load, 30000);
+    </script>
+</body>
+</html>`;
+  return new Response(html, { headers: { "Content-Type": "text/html;charset=UTF-8" } });
+}
+
+// --- LÓGICA DE TRADING ---
+
 async function runBot() {
-  const apiKey = typeof BINANCE_API_KEY !== 'undefined' ? BINANCE_API_KEY : null;
-  const apiSecret = typeof BINANCE_API_SECRET !== 'undefined' ? BINANCE_API_SECRET : null;
-  const botToken = typeof TELEGRAM_BOT_TOKEN !== 'undefined' ? TELEGRAM_BOT_TOKEN : null;
-  const chatId = typeof TELEGRAM_CHAT_ID !== 'undefined' ? TELEGRAM_CHAT_ID : null;
-  const usdPerTrade = typeof USD_PER_TRADE !== 'undefined' ? parseFloat(USD_PER_TRADE) : 50;
-  const topN = typeof TOP_N !== 'undefined' ? parseInt(TOP_N) : 10;
+  const apiKey = getEnvVar("BINANCE_API_KEY");
+  const apiSecret = getEnvVar("BINANCE_API_SECRET");
+  if (!apiKey || !apiSecret) return;
 
-  if (!apiKey || !apiSecret) {
-    console.log("Faltan API Keys. El bot no puede continuar.");
-    return;
-  }
-
+  const topN = getEnvVar("TOP_N", DEFAULT_TOP_N);
   const symbols = await getTopSymbols(topN);
+  
   for (const symbol of symbols) {
     try {
-      const candles = await getKlines(symbol, '5m', 200);
-      if (!candles || !Array.isArray(candles) || candles.length < 200) continue;
-
-      const indicators = calculateIndicators(symbol, candles);
-      const signal = detectPattern(indicators);
-
-      if (signal.patron !== "HOLD" && signal.fuerza >= 80) {
-        const config = { TELEGRAM_BOT_TOKEN: botToken, TELEGRAM_CHAT_ID: chatId };
-        await executeTrade(symbol, signal.patron, usdPerTrade, config, indicators.close);
+      const klines = await getKlines(symbol, '5m', 200);
+      if (!klines) continue;
+      const ind = calculateIndicators(symbol, klines);
+      const sig = detectPattern(ind);
+      if (sig.patron !== "HOLD") {
+        await sendTelegram(`🚨 SEÑAL: ${sig.patron} en ${symbol} (Precio: ${ind.close})`);
       }
-    } catch (err) {
-      console.error(`Error en ${symbol}:`, err.message);
-    }
+    } catch (e) {}
   }
 }
 
 async function getTopSymbols(topN) {
-  // Intentar con diferentes subdominios de Binance si el principal falla
   const endpoints = [
     "https://api.binance.com/api/v3/ticker/24hr",
-    "https://api1.binance.com/api/v3/ticker/24hr",
-    "https://api2.binance.com/api/v3/ticker/24hr",
-    "https://api3.binance.com/api/v3/ticker/24hr"
+    "https://api1.binance.com/api/v3/ticker/24hr"
   ];
-
-  let lastError = null;
   for (const url of endpoints) {
     try {
-      const resp = await fetch(url, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-          "Accept": "application/json"
-        },
-        cf: { cacheTtl: 60 } // Cachear 1 minuto en Cloudflare para evitar spam
-      });
-
-      if (resp.ok) {
-        const data = await resp.json();
-        return data
-          .filter(t => t.symbol && t.symbol.endsWith("USDT"))
-          .sort((a, b) => parseFloat(b.quoteVolume) - parseFloat(a.quoteVolume))
-          .slice(0, topN)
-          .map(t => t.symbol);
+      const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
+      if (r.ok) {
+        const d = await r.json();
+        return d.filter(t => t.symbol.endsWith("USDT"))
+                .sort((a,b) => b.quoteVolume - a.quoteVolume)
+                .slice(0, topN).map(t => t.symbol);
       }
-      lastError = `Binance ${new URL(url).hostname} error: ${resp.status}`;
-    } catch (e) {
-      lastError = e.message;
-    }
+    } catch (e) {}
   }
-  throw new Error(lastError || "No se pudo conectar con ningún endpoint de Binance");
+  throw new Error("Binance inaccesible");
 }
 
 async function getKlines(symbol, interval, limit) {
-  const endpoints = [
-    `https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
-    `https://api1.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`,
-    `https://api2.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`
-  ];
-
-  for (const url of endpoints) {
-    try {
-      const resp = await fetch(url, {
-        headers: { "User-Agent": "Mozilla/5.0" },
-        cf: { cacheTtl: 300 } // Cachear velas 5 min
-      });
-      if (resp.ok) return await resp.json();
-    } catch (e) {}
-  }
-  return null;
+  try {
+    const r = await fetch(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+    return r.ok ? await r.json() : null;
+  } catch (e) { return null; }
 }
 
 function calculateIndicators(symbol, candles) {
-  const prices = candles.map(c => parseFloat(c[4])); 
-  const volumes = candles.map(c => parseFloat(c[5])); 
-  const sma = (data, period) => {
-    if (data.length < period) return 0;
-    return data.slice(-period).reduce((a, b) => a + b, 0) / period;
-  };
-  const currentVol = volumes[volumes.length - 1];
-  const ma20Vol = sma(volumes.slice(0, -1), 20);
-  const rvol = ma20Vol > 0 ? currentVol / ma20Vol : 0;
+  const close = candles.map(c => parseFloat(c[4]));
+  const vol = candles.map(c => parseFloat(c[5]));
+  const avg = (arr) => arr.reduce((a,b) => a+b, 0) / arr.length;
+  const sma50 = avg(close.slice(-50));
+  const sma200 = avg(close.slice(-200));
+  const volMa20 = avg(vol.slice(-21, -1));
   return {
-    symbol, close: prices[prices.length - 1],
-    prevHigh: parseFloat(candles[candles.length - 2][2]),
-    prevLow: parseFloat(candles[candles.length - 2][3]),
-    currentVol, prevVol: parseFloat(candles[candles.length - 2][5]),
-    rvol, sma50: sma(prices, 50), sma200: sma(prices, 200)
+    symbol, close: close[close.length-1],
+    rvol: vol[vol.length-1] / volMa20,
+    sma50, sma200,
+    highPrev: parseFloat(candles[candles.length-2][2]),
+    lowPrev: parseFloat(candles[candles.length-2][3]),
+    volPrev: parseFloat(candles[candles.length-2][5]),
+    volCur: vol[vol.length-1]
   };
 }
 
-function detectPattern(ind) {
-  const alcista = ind.sma50 > ind.sma200;
-  const bajista = ind.sma50 < ind.sma200;
-  const rupturaAlcista = ind.close > ind.prevHigh && ind.currentVol > ind.prevVol * 1.5;
-  const rupturaBajista = ind.close < ind.prevLow && ind.currentVol > ind.prevVol * 1.5;
-  const volExplosivo = ind.rvol > 2.0;
-  if (alcista && rupturaAlcista && volExplosivo) return { patron: "BUY", fuerza: Math.min(100, ind.rvol * 30) };
-  if (bajista && rupturaBajista && volExplosivo) return { patron: "SELL", fuerza: Math.min(100, ind.rvol * 30) };
-  return { patron: "HOLD", fuerza: 0 };
+function detectPattern(i) {
+  const explosive = i.rvol > 2.0;
+  if (i.sma50 > i.sma200 && i.close > i.highPrev && i.volCur > i.volPrev * 1.5 && explosive) return { patron: "BUY" };
+  if (i.sma50 < i.sma200 && i.close < i.lowPrev && i.volCur > i.volPrev * 1.5 && explosive) return { patron: "SELL" };
+  return { patron: "HOLD" };
 }
 
-async function executeTrade(symbol, side, amountUsd, config, price) {
-  const msg = `🚨 SEÑAL: ${side} en ${symbol} (Monto: ${amountUsd} USD, Precio: ${price})`;
-  await sendTelegram(msg, config);
-}
-
-async function sendTelegram(text, config) {
-  if (!config.TELEGRAM_BOT_TOKEN || !config.TELEGRAM_CHAT_ID) return;
-  const url = `https://api.telegram.org/bot${config.TELEGRAM_BOT_TOKEN}/sendMessage`;
-  await fetch(url, {
+async function sendTelegram(text) {
+  const token = getEnvVar("TELEGRAM_BOT_TOKEN");
+  const chatId = getEnvVar("TELEGRAM_CHAT_ID");
+  if (!token || !chatId) return;
+  await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: config.TELEGRAM_CHAT_ID, text, parse_mode: 'Markdown' })
+    body: JSON.stringify({ chat_id: chatId, text })
   });
 }
+
+function getEnvVar(name, fallback = null) {
+  try {
+    return typeof globalThis[name] !== 'undefined' ? globalThis[name] : fallback;
+  } catch (e) { return fallback; }
+}
+
+// --- EVENT LISTENERS ---
+addEventListener("fetch", event => {
+  event.respondWith(handleRequest(event.request));
+});
+
+addEventListener("scheduled", event => {
+  event.waitUntil(runBot());
+});
