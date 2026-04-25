@@ -1,6 +1,6 @@
 /**
- * 🚀 Volumen-369 Trading Bot - Versión ELITE V4 "LIQUIDITY HUNTER"
- * Caza de barridas de volumen, rebotes en imanes y visibilidad ultra-alta.
+ * 🚀 Volumen-369 Trading Bot - Versión ELITE V5 "MAGNET GRAVITY"
+ * Lógica: Entrada en Imanes de Liquidación + Gravedad del Order Book.
  */
 
 async function handleRequest(request) {
@@ -47,11 +47,12 @@ async function checkSymbolExists(symbol) {
 async function getProAnalysis(symbol) {
   symbol = symbol.toUpperCase();
   
-  const [c15m, c1h, c4h, c1d] = await Promise.all([
+  const [c15m, c1h, c4h, c1d, depth] = await Promise.all([
     fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=100`),
     fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=100`),
     fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=4h&limit=100`),
-    fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=50`)
+    fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=50`),
+    fetchBinance(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=100`)
   ]);
 
   let futures = { funding: 0, oi: 0, oiChange: 0 };
@@ -66,63 +67,51 @@ async function getProAnalysis(symbol) {
     }
   } catch(e) {}
 
-  const getBias = (candles) => {
-    const close = candles.map(c => parseFloat(c[4]));
-    const sma50 = close.slice(-50).reduce((a,b)=>a+b,0) / 50;
-    const sma200 = close.slice(-100).reduce((a,b)=>a+b,0) / 100;
-    return close[close.length-1] > sma50 ? "ALCISTA" : "BAJISTA";
-  };
-
-  const bias15m = getBias(c15m);
-  const bias1h = getBias(c1h);
-  const bias4h = getBias(c4h);
-  const bias1d = getBias(c1d);
-
   const lastPrice = parseFloat(c15m[c15m.length-1][4]);
-  const atr15m = calculateATR(c15m.map(c=>parseFloat(c[2])), c15m.map(c=>parseFloat(c[3])), c15m.map(c=>parseFloat(c[4])), 14);
-
-  // LÓGICA DE BARRIDA Y REBOTE (LIQUIDITY HUNTER)
-  const liqShorts = lastPrice * 1.025; // Imán superior
-  const liqLongs = lastPrice * 0.975;  // Imán inferior
   
-  let idea = "ESPERAR BARRIDA";
-  let tp1, tp2, sl;
+  // ANALISIS DE GRAVEDAD DEL ORDER BOOK (BIDS VS ASKS)
+  const totalBids = depth.bids.reduce((a, b) => a + parseFloat(b[1]), 0);
+  const totalAsks = depth.asks.reduce((a, b) => a + parseFloat(b[1]), 0);
+  const gravitySource = totalBids > totalAsks ? "COMPRADORES (BIDS)" : "VENDEDORES (ASKS)";
+  const gravityPower = ((Math.max(totalBids, totalAsks) / (totalBids + totalAsks)) * 100).toFixed(1);
 
-  if (bias1d === "ALCISTA") {
-    // Si la tendencia macro es alcista, buscamos que el precio caiga a liquidar LONGs para comprar el rebote
-    idea = "COMPRAR REBOTE EN LIQ LONGS";
-    sl = (liqLongs * 0.99).toFixed(symbol.includes("USDT") ? 2 : 5);
-    tp1 = lastPrice.toFixed(symbol.includes("USDT") ? 2 : 5);
-    tp2 = liqShorts.toFixed(symbol.includes("USDT") ? 2 : 5);
+  // LÓGICA MAGNET GRAVITY: Entrada en el Imán de Liquidación
+  const liqShorts = lastPrice * 1.025; // Imán Superior
+  const liqLongs = lastPrice * 0.975;  // Imán Inferior
+  
+  let idea = "";
+  let entry, tp1, tp2, sl;
+
+  // El precio siempre va hacia donde hay más volumen (Gravedad)
+  if (totalBids > totalAsks) {
+    // La masa de dinero está abajo (Bids). El precio cae al imán de Longs, ahí rebotamos.
+    idea = "REBOTE EN IMÁN DE LONGS";
+    entry = liqLongs;
+    sl = (entry * 0.992).toFixed(symbol.includes("USDT") ? 2 : 5);
+    tp1 = lastPrice.toFixed(symbol.includes("USDT") ? 2 : 5); // Volver al precio actual
+    tp2 = liqShorts.toFixed(symbol.includes("USDT") ? 2 : 5); // Barrida total al imán opuesto
   } else {
-    // Si la tendencia macro es bajista, buscamos que el precio suba a liquidar SHORTs para vender la caída
-    idea = "VENDER RECHAZO EN LIQ SHORTS";
-    sl = (liqShorts * 1.01).toFixed(symbol.includes("USDT") ? 2 : 5);
+    // La masa de dinero está arriba (Asks). El precio sube al imán de Shorts, ahí rechazamos.
+    idea = "RECHAZO EN IMÁN DE SHORTS";
+    entry = liqShorts;
+    sl = (entry * 1.008).toFixed(symbol.includes("USDT") ? 2 : 5);
     tp1 = lastPrice.toFixed(symbol.includes("USDT") ? 2 : 5);
     tp2 = liqLongs.toFixed(symbol.includes("USDT") ? 2 : 5);
   }
 
   return {
     symbol, price: lastPrice,
-    mtf: { "15m": bias15m, "1h": bias1h, "4h": bias4h, "1d": bias1d },
-    confluence: (bias15m === bias1h && bias1h === bias4h ? "ALTA" : "BAJA"),
-    sentiment: futures.funding < 0 ? "MIEDO (Oportunidad Long)" : "EUFORIA (Oportunidad Short)",
-    funding: (futures.funding * 100).toFixed(4) + "%",
-    oi: futures.oi.toLocaleString(),
-    oiChange: futures.oiChange.toFixed(2) + "%",
+    gravitySource, gravityPower: gravityPower + "%",
     liqShorts: liqShorts.toFixed(symbol.includes("USDT") ? 2 : 5),
     liqLongs: liqLongs.toFixed(symbol.includes("USDT") ? 2 : 5),
     idea,
-    plan: { entry: lastPrice.toFixed(symbol.includes("USDT") ? 2 : 5), sl, tp1, tp2 }
+    funding: (futures.funding * 100).toFixed(4) + "%",
+    oi: futures.oi.toLocaleString(),
+    plan: { 
+      entry: entry.toFixed(symbol.includes("USDT") ? 2 : 5), 
+      sl, tp1, tp2 
+    }
   };
-}
-
-function calculateATR(h, l, c, p) {
-  let trs = [];
-  for(let i=1; i<h.length; i++) {
-    trs.push(Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1])));
-  }
-  return trs.slice(-p).reduce((a,b)=>a+b, 0) / p;
 }
 
 async function fetchBinance(url) {
@@ -137,63 +126,61 @@ async function handleDashboard() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Volumen-369 V4 HUNTER</title>
+    <title>Volumen-369 V5 GRAVITY</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         :root { --bg: #0b0e11; --card: #1e2329; --yellow: #f0b90b; --green: #0ecb81; --red: #f6465d; --text: #ffffff; }
-        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-weight: 700; }
-        .card { background: var(--card); border: 2px solid #474d57; border-radius: 15px; padding: 25px; box-shadow: 0 10px 20px rgba(0,0,0,0.6); }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-weight: 800; }
+        .card { background: var(--card); border: 3px solid #474d57; border-radius: 20px; padding: 30px; box-shadow: 0 15px 30px rgba(0,0,0,0.7); }
         
-        /* VISIBILIDAD ULTRA ALTA */
-        .metric-label { color: #b7bdc6; font-size: 0.9rem; text-transform: uppercase; margin-bottom: 5px; }
-        .metric-value { font-size: 2.2rem; font-weight: 900; color: var(--yellow); text-shadow: 0 0 10px rgba(240, 185, 11, 0.3); }
-        .plan-val { font-size: 1.8rem; font-weight: 900; color: #fff; }
+        .metric-label { color: #b7bdc6; font-size: 1rem; text-transform: uppercase; letter-spacing: 1px; }
+        .metric-value { font-size: 2.8rem; font-weight: 900; color: var(--yellow); text-shadow: 0 0 15px rgba(240, 185, 11, 0.4); }
+        .plan-val { font-size: 2.2rem; font-weight: 900; color: #fff; }
         
-        .BUY, .ALCISTA { color: var(--green) !important; }
-        .SELL, .BAJISTA { color: var(--red) !important; }
+        .BUY { color: var(--green) !important; }
+        .SELL { color: var(--red) !important; }
         
-        .bias-pill { padding: 8px 15px; border-radius: 10px; font-size: 0.8rem; border: 2px solid transparent; }
-        .ALCISTA-P { background: rgba(14, 203, 129, 0.2); border-color: var(--green); color: var(--green); }
-        .BAJISTA-P { background: rgba(246, 70, 93, 0.2); border-color: var(--red); color: var(--red); }
+        .search-box { background: #2b3139; border: 4px solid var(--yellow); color: #fff; padding: 18px 30px; border-radius: 60px; width: 450px; font-size: 1.4rem; outline: none; box-shadow: 0 0 20px rgba(240, 185, 11, 0.2); }
         
-        .search-box { background: #2b3139; border: 3px solid var(--yellow); color: #fff; padding: 15px 25px; border-radius: 50px; width: 400px; font-size: 1.2rem; outline: none; }
-        .liq-zone { padding: 20px; border-radius: 15px; margin-top: 15px; border: 3px solid; }
-        .liq-shorts { background: rgba(14, 203, 129, 0.1); border-color: var(--green); }
-        .liq-longs { background: rgba(246, 70, 93, 0.1); border-color: var(--red); }
+        .liq-zone { padding: 25px; border-radius: 20px; margin-top: 20px; border: 4px solid; position: relative; overflow: hidden; }
+        .liq-shorts { background: rgba(14, 203, 129, 0.15); border-color: var(--green); }
+        .liq-longs { background: rgba(246, 70, 93, 0.15); border-color: var(--red); }
         
-        .chart-container { height: 550px; border-radius: 15px; overflow: hidden; border: 2px solid #474d57; }
-        #idea-pill { background: var(--yellow); color: #000; padding: 10px 20px; border-radius: 10px; display: inline-block; margin-top: 10px; font-size: 1.1rem; }
+        .chart-container { height: 600px; border-radius: 20px; overflow: hidden; border: 3px solid #474d57; }
+        #idea-pill { background: var(--yellow); color: #000; padding: 12px 25px; border-radius: 12px; font-size: 1.3rem; font-weight: 900; box-shadow: 0 5px 15px rgba(240, 185, 11, 0.4); }
+        
+        .gravity-bar { height: 12px; background: #2b3139; border-radius: 10px; margin-top: 10px; overflow: hidden; border: 1px solid #474d57; }
+        .gravity-fill { height: 100%; background: var(--yellow); transition: 0.5s; box-shadow: 0 0 10px var(--yellow); }
     </style>
 </head>
 <body>
     <div class="container-fluid p-4">
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2 class="m-0 fw-bold">🚀 Volumen-369 <span class="badge bg-warning text-dark">V4 HUNTER</span></h2>
-            <div class="d-flex gap-3">
-                <div id="mtf-panel" class="d-flex gap-2">
-                    <span id="b15m" class="bias-pill">15M: --</span>
-                    <span id="b1h" class="bias-pill">1H: --</span>
-                    <span id="b4h" class="bias-pill">4H: --</span>
-                    <span id="b1d" class="bias-pill">1D: --</span>
-                </div>
-                <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO (BTC, SOL...)" onkeypress="if(event.key==='Enter') updateSymbol()">
-            </div>
+            <h1 class="m-0 fw-bold">🚀 Volumen-369 <span class="badge bg-warning text-dark">V5 MAGNET GRAVITY</span></h1>
+            <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO (BTC, ETH...)" onkeypress="if(event.key==='Enter') updateSymbol()">
         </div>
 
         <div class="row g-4">
             <div class="col-lg-8">
                 <div class="chart-container" id="tv_chart"></div>
-                <!-- PLAN OPERATIVO -->
+                <!-- PLAN MAGNET GRAVITY -->
                 <div class="card mt-4">
-                    <div class="d-flex justify-content-between">
-                        <h4 class="metric-label">🎯 PLAN DE REBOTE INSTITUCIONAL</h4>
-                        <div id="idea-pill">ESPERANDO SEÑAL...</div>
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <h4 class="metric-label m-0">🎯 ENTRADA EN IMÁN DE LIQUIDACIÓN</h4>
+                            <div id="idea-pill" class="mt-2">BUSCANDO GRAVEDAD...</div>
+                        </div>
+                        <div class="text-end" style="width: 300px;">
+                            <div class="metric-label">FUERZA DE GRAVEDAD (<span id="gravitySource">---</span>)</div>
+                            <div class="gravity-bar"><div id="gravityFill" class="gravity-fill" style="width: 0%"></div></div>
+                            <div id="gravityPower" class="mt-1" style="color: var(--yellow);">---</div>
+                        </div>
                     </div>
                     <div class="row text-center mt-4">
-                        <div class="col-3"><div class="metric-label">ENTRADA</div><div id="planEntry" class="plan-val">---</div></div>
+                        <div class="col-3"><div class="metric-label">ENTRADA (IMÁN)</div><div id="planEntry" class="plan-val" style="color: var(--yellow);">---</div></div>
                         <div class="col-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="SELL plan-val">---</div></div>
-                        <div class="col-3"><div class="metric-label text-success">TARGET 1</div><div id="planTP1" class="BUY plan-val">---</div></div>
-                        <div class="col-3"><div class="metric-label text-warning">TARGET 2 (BARRIDA)</div><div id="planTP2" class="plan-val" style="color: var(--yellow);">---</div></div>
+                        <div class="col-3"><div class="metric-label text-success">TARGET 1 (REBOTE)</div><div id="planTP1" class="BUY plan-val">---</div></div>
+                        <div class="col-3"><div class="metric-label text-warning">TARGET 2 (BARRIDA TOTAL)</div><div id="planTP2" class="plan-val" style="color: #fff;">---</div></div>
                     </div>
                 </div>
             </div>
@@ -201,24 +188,26 @@ async function handleDashboard() {
             <div class="col-lg-4">
                 <div class="row g-4">
                     <div class="col-12">
-                        <div class="card">
-                            <div class="metric-label">PRECIO <span id="curSymbol" class="text-white">BTCUSDT</span></div>
+                        <div class="card text-center">
+                            <div class="metric-label">PRECIO ACTUAL <span id="curSymbol" class="text-white">BTCUSDT</span></div>
                             <div id="price" class="metric-value">---</div>
                             <hr>
-                            <div class="metric-label">SENTIMIENTO DE MERCADO</div>
-                            <div id="sentiment" class="h4">---</div>
+                            <div class="row">
+                                <div class="col-6"><div class="metric-label">FUNDING</div><div id="funding" class="h5">---</div></div>
+                                <div class="col-6"><div class="metric-label">OPEN INTEREST</div><div id="oi" class="h5">---</div></div>
+                            </div>
                         </div>
                     </div>
                     <div class="col-12">
                         <div class="card">
-                            <h5 class="metric-label">IMANES DE LIQUIDACIÓN (TARGETS)</h5>
+                            <h5 class="metric-label text-center">NIVELES DE ENTRADA ALGORÍTMICA (IMANES)</h5>
                             <div class="liq-zone liq-shorts">
-                                <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (ARRIBA)</div>
-                                <div id="liqShorts" class="BUY h3 m-0">---</div>
+                                <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (PUNTO DE REBOTE)</div>
+                                <div id="liqShorts" class="BUY h1 m-0">---</div>
                             </div>
                             <div class="liq-zone liq-longs">
-                                <div class="metric-label text-danger">LIQUIDACIÓN DE LONGS (ABAJO)</div>
-                                <div id="liqLongs" class="SELL h3 m-0">---</div>
+                                <div class="metric-label text-danger">LIQUIDACIÓN DE LONGS (PUNTO DE REBOTE)</div>
+                                <div id="liqLongs" class="SELL h1 m-0">---</div>
                             </div>
                         </div>
                     </div>
@@ -233,7 +222,7 @@ async function handleDashboard() {
         function initChart(s) {
             new TradingView.widget({
                 "autosize": true, "symbol": "BINANCE:" + s, "interval": "15", "theme": "dark", "style": "1",
-                "container_id": "tv_chart", "studies": ["VWAP@tv-basicstudies", "MASimple@tv-basicstudies"]
+                "container_id": "tv_chart", "studies": ["VWAP@tv-basicstudies"]
             });
         }
 
@@ -250,7 +239,6 @@ async function handleDashboard() {
             const d = await (await fetch(\`/api/pro-analysis?symbol=\${currentSymbol}\`)).json();
             document.getElementById('price').innerText = d.price.toLocaleString();
             document.getElementById('curSymbol').innerText = d.symbol;
-            document.getElementById('sentiment').innerText = d.sentiment;
             document.getElementById('liqShorts').innerText = d.liqShorts;
             document.getElementById('liqLongs').innerText = d.liqLongs;
             document.getElementById('idea-pill').innerText = d.idea;
@@ -258,16 +246,14 @@ async function handleDashboard() {
             document.getElementById('planSL').innerText = d.plan.sl;
             document.getElementById('planTP1').innerText = d.plan.tp1;
             document.getElementById('planTP2').innerText = d.plan.tp2;
-
-            const tfs = ["15m", "1h", "4h", "1d"];
-            tfs.forEach(tf => {
-                const el = document.getElementById('b' + tf);
-                el.innerText = tf.toUpperCase() + ": " + d.mtf[tf];
-                el.className = "bias-pill " + d.mtf[tf] + "-P";
-            });
+            document.getElementById('gravitySource').innerText = d.gravitySource;
+            document.getElementById('gravityPower').innerText = d.gravityPower;
+            document.getElementById('gravityFill').style.width = d.gravityPower;
+            document.getElementById('funding').innerText = d.funding;
+            document.getElementById('oi').innerText = d.oi;
         }
 
-        initChart(currentSymbol); loadData(); setInterval(loadData, 15000);
+        initChart(currentSymbol); loadData(); setInterval(loadData, 10000);
     </script>
 </body>
 </html>`;
