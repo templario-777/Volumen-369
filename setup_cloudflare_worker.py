@@ -10,52 +10,45 @@ import requests
 from datetime import datetime
 
 def crear_worker():
-    # Obtener credenciales de Streamlit Secrets o variable de entorno
-    try:
-        import streamlit as st
-        api_token = st.secrets.get("CLOUDFLARE_API_TOKEN", os.getenv("CLOUDFLARE_API_TOKEN"))
-        account_id = st.secrets.get("CLOUDFLARE_ACCOUNT_ID", os.getenv("CLOUDFLARE_ACCOUNT_ID"))
-    except:
-        api_token = os.getenv("CLOUDFLARE_API_TOKEN")
-        account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
+    # Obtener credenciales explícitas o de variable de entorno
+    api_token = os.getenv("CLOUDFLARE_API_TOKEN")
+    account_id = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 
-    if not api_token or not account_id:
-        print("❌ Faltan credenciales:")
-        print("   CLOUDFLARE_API_TOKEN")
-        print("   CLOUDFLARE_ACCOUNT_ID")
-        print("\nAñadelos en Streamlit Secrets o como variables de entorno.")
+    if not api_token or not account_id or "Pega_aqui" in account_id:
+        # Intentar leer del archivo .env directamente
+        try:
+            with open(".env", "r") as f:
+                for line in f:
+                    if "CLOUDFLARE_API_TOKEN=" in line:
+                        api_token = line.split("=")[1].strip()
+                    if "CLOUDFLARE_ACCOUNT_ID=" in line:
+                        account_id = line.split("=")[1].strip()
+        except:
+            pass
+
+    if not api_token or not account_id or "Pega_aqui" in account_id:
+        print("❌ Error: No se encontraron las credenciales de Cloudflare.")
+        print("   Asegúrate de que CLOUDFLARE_API_TOKEN y CLOUDFLARE_ACCOUNT_ID")
+        print("   estén configurados correctamente.")
         return False
 
-    # Código del Worker (proxy para Binance)
-    worker_script = """
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-    const target = url.searchParams.get("target");
-    if (!target) return new Response("Falta ?target=", {status: 400});
-
-    const init = {
-      method: request.method,
-      headers: request.headers,
-      redirect: "follow"
-    };
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      init.body = request.body;
-    }
-    return fetch(target + url.pathname + url.search, init);
-  }
-}
-"""
+    # Leer el código del Worker desde el archivo bot_worker.js
+    try:
+        with open("bot_worker.js", "r", encoding="utf-8") as f:
+            worker_script = f.read()
+    except Exception as e:
+        print(f"❌ Error leyendo bot_worker.js: {e}")
+        return False
 
     # URL de la API de Cloudflare
-    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/binance-proxy"
+    url = f"https://api.cloudflare.com/client/v4/accounts/{account_id}/workers/scripts/volumen-369-bot"
 
     headers = {
         "Authorization": f"Bearer {api_token}",
         "Content-Type": "application/javascript"
     }
 
-    print(f"🔗 Creando Worker 'binance-proxy' en cuenta {account_id[:8]}...")
+    print(f"🔗 Desplegando Bot Autónomo 'volumen-369-bot' en cuenta {account_id[:8]}...")
 
     try:
         resp = requests.put(
@@ -68,11 +61,18 @@ export default {
         if resp.status_code in [200, 201]:
             result = resp.json()
             if result.get("success"):
-                worker_url = f"https://binance-proxy.{account_id}.workers.dev"
-                print(f"✅ Worker creado exitosamente!")
-                print(f"🌐 URL del Worker: {worker_url}")
-                print(f"\n📋 Añade esto en Streamlit Secrets:")
-                print(f"   CLOUDFLARE_WORKER_URL = {worker_url}")
+                worker_url = f"https://volumen-369-bot.{account_id}.workers.dev"
+                print(f"✅ Bot desplegado exitosamente!")
+                print(f"🌐 URL del Bot: {worker_url}")
+                print("\n🔔 PASO IMPORTANTE:")
+                print("1. Ve a Cloudflare Dashboard -> Workers & Pages -> volumen-369-bot")
+                print("2. Ve a 'Triggers' -> 'Cron Triggers' -> 'Add Cron Trigger'")
+                print("3. Configura: */5 * * * * (Cada 5 minutos)")
+                print("4. Asegúrate de añadir tus variables de entorno en 'Settings' -> 'Variables':")
+                print("   - BINANCE_API_KEY")
+                print("   - BINANCE_API_SECRET")
+                print("   - TELEGRAM_BOT_TOKEN")
+                print("   - TELEGRAM_CHAT_ID")
                 return worker_url
             else:
                 print(f"❌ Error de API: {result.get('errors', 'Desconocido')}")

@@ -1,4 +1,6 @@
 .venv/
+venv/
+lib/
 __pycache__/
 *.pyc
 *.pyo
@@ -7,3 +9,6 @@ __pycache__/
 .env
 .env.*
 .streamlit/secrets.toml
+node_modules/
+dist/
+.wrangler/
