@@ -83,6 +83,17 @@ async function handleDashboard() {
               try {
                   const resp = await fetch('/api/status');
                   const data = await resp.json();
+                  
+                  if (data.error) {
+                      document.getElementById('market-data').innerHTML = \`
+                          <tr><td colspan="5" class="text-center text-danger py-4">
+                              ❌ Error de Binance: \${data.message}<br>
+                              <small>Es posible que Cloudflare esté bloqueado temporalmente por Binance o falten permisos.</small>
+                          </td></tr>
+                      \`;
+                      return;
+                  }
+
                   const tbody = document.getElementById('market-data');
                   tbody.innerHTML = '';
 
@@ -135,35 +146,42 @@ async function handleDashboard() {
 }
 
 async function handleStatus() {
-  const config = {
-    TOP_N: typeof globalThis.TOP_N !== 'undefined' ? parseInt(globalThis.TOP_N) : 10,
-  };
-  
-  const symbols = await getTopSymbols(config.TOP_N);
-  const statusData = [];
+  try {
+    const config = {
+      TOP_N: typeof globalThis.TOP_N !== 'undefined' ? parseInt(globalThis.TOP_N) : 10,
+    };
+    
+    const symbols = await getTopSymbols(config.TOP_N);
+    const statusData = [];
 
-  for (const symbol of symbols) {
-    try {
-      const candles = await getKlines(symbol, '5m', 200);
-      if (!candles || candles.length < 200) continue;
+    for (const symbol of symbols) {
+      try {
+        const candles = await getKlines(symbol, '5m', 200);
+        if (!candles || candles.length < 200) continue;
 
-      const indicators = calculateIndicators(symbol, candles);
-      const signal = detectPattern(indicators);
+        const indicators = calculateIndicators(symbol, candles);
+        const signal = detectPattern(indicators);
 
-      statusData.push({
-        symbol: symbol,
-        price: indicators.close,
-        rvol: indicators.rvol,
-        sma50: indicators.sma50,
-        sma200: indicators.sma200,
-        signal: signal.patron
-      });
-    } catch (e) {}
+        statusData.push({
+          symbol: symbol,
+          price: indicators.close,
+          rvol: indicators.rvol,
+          sma50: indicators.sma50,
+          sma200: indicators.sma200,
+          signal: signal.patron
+        });
+      } catch (e) {}
+    }
+
+    return new Response(JSON.stringify(statusData), {
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+    });
+  } catch (err) {
+    return new Response(JSON.stringify({ error: true, message: err.message }), {
+      status: 500,
+      headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
+    });
   }
-
-  return new Response(JSON.stringify(statusData), {
-    headers: { "Content-Type": "application/json", "Access-Control-Allow-Origin": "*" }
-  });
 }
 
 async function handleProxy(request, targetUrl) {
@@ -254,8 +272,13 @@ async function runBot() {
 
 async function getTopSymbols(topN) {
   try {
-    const resp = await fetch("https://api.binance.com/api/v3/ticker/24hr");
-    if (!resp.ok) throw new Error(`Binance API error: ${resp.status}`);
+    const resp = await fetch("https://api.binance.com/api/v3/ticker/24hr", {
+      headers: { "User-Agent": "Mozilla/5.0" }
+    });
+    if (!resp.ok) {
+      const errorText = await resp.text();
+      throw new Error(`Binance API error: ${resp.status} - ${errorText}`);
+    }
     const data = await resp.json();
     return data
       .filter(t => t.symbol && t.symbol.endsWith("USDT"))
@@ -264,7 +287,7 @@ async function getTopSymbols(topN) {
       .map(t => t.symbol);
   } catch (e) {
     console.error("Error getTopSymbols:", e.message);
-    return [];
+    throw e; // Lanzar el error para capturarlo en handleStatus
   }
 }
 
