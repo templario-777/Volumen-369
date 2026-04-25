@@ -131,16 +131,23 @@ streamlit run web_binance_bot.py
 - Los datos de API se manejan en memoria local
 - En producción: usa Secrets en Streamlit
 
-## 🚀 Mejas Próximas
+## 🚀 Avances Recientes
 
-- [ ] Alertas via Telegram/WhatsApp
-- [ ] Backtesting integrado
-- [ ] Soporte para más exchanges
-- [ ] Advanced risk management
-- [ ] Historical data analysis
+- ✅ Escaneo de Top 10 criptomonedas por día
+- ✅ Notificaciones a Telegram vía DeepSeek
+- ✅ UI responsiva para móvil/escritorio
+- ⬜ Backtesting automatizado con Pyfolio
+- ⬜ Sistema de alertas push vía WhatsApp/Webhook
+- ⬜ Soporte multi-exchange (KuCoin, Bybit...)
+- ⬜ Monitoreo 24/7 con alarmas críticas
+- ⬜ Panel de métricas históricas por par
 
 ---
 
-**Nota**: Este bot está diseñado para análisis educativo y operación responsable. Siempre prueba en testnet antes de operar con capital real.
+**Repositorio actualizado:** https://github.com/templario-777/Volumen-369  
+**Despliegue recomendado:** [Streamlit Community Cloud](https://share.streamlit.io/)  
+**Dependencias:** `ccxt`, `pandas`, `streamlit`, `plotly`, `numpy`
+
+> ⚠️ *Este bot es únicamente para fines educativos. Siempre opera con precaución, en testnet o con capitales de riesgo controlado.*
 
 **Co-Authored-By**: Claude Opus 4.7 <noreply@anthropic.com>
