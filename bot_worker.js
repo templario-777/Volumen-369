@@ -1,12 +1,11 @@
 /**
- * 🚀 Volumen-369 Trading Bot - Versión PRO ELITE
- * Análisis de Volumen, VWAP, Futuros, Liquidaciones y Gráficos en Tiempo Real.
+ * 🚀 Volumen-369 Trading Bot - Versión ELITE FINAL "Smart Money"
+ * Implementación de Wyckoff, CVD Divergence, Squeeze de Volatilidad y OI Avanzado.
  */
 
 async function handleRequest(request) {
   const url = new URL(request.url);
   const targetUrl = url.searchParams.get("target");
-
   if (targetUrl) return await handleProxy(request, targetUrl);
 
   try {
@@ -41,86 +40,101 @@ async function checkSymbolExists(symbol) {
   try {
     const data = await fetchBinance(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol.toUpperCase()}`);
     return !!data.symbol;
-  } catch (e) {
-    return false;
-  }
+  } catch (e) { return false; }
 }
 
 async function getProAnalysis(symbol) {
   symbol = symbol.toUpperCase();
-  // 1. Obtener datos básicos y velas
-  const candles = await fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=100`);
-  const orderBook = await fetchBinance(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=100`);
+  const candles = await fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=5m&limit=200`);
+  const ticker24h = await fetchBinance(`https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`);
   
-  // 2. Datos de Futuros (Si es posible)
-  let futuresData = { fundingRate: "0.00%", openInterest: "N/D" };
+  // 1. Datos de Futuros Avanzados (OI y Funding)
+  let futures = { funding: 0, oi: 0, oiChange: 0 };
   try {
     const fTicker = await fetchBinance(`https://fapi.binance.com/fapi/v1/premiumIndex?symbol=${symbol}`);
     const fOI = await fetchBinance(`https://fapi.binance.com/fapi/v1/openInterest?symbol=${symbol}`);
-    futuresData.fundingRate = (parseFloat(fTicker.lastFundingRate) * 100).toFixed(4) + "%";
-    futuresData.openInterest = parseFloat(fOI.openInterest).toLocaleString();
+    const fOIHist = await fetchBinance(`https://fapi.binance.com/fapi/v1/openInterestHist?symbol=${symbol}&period=5m&limit=2`);
+    futures.funding = parseFloat(fTicker.lastFundingRate);
+    futures.oi = parseFloat(fOI.openInterest);
+    if(fOIHist.length >= 2) {
+      futures.oiChange = ((futures.oi - parseFloat(fOIHist[0].sumOpenInterest)) / parseFloat(fOIHist[0].sumOpenInterest)) * 100;
+    }
   } catch(e) {}
 
-  const lastClose = parseFloat(candles[candles.length-1][4]);
+  const close = candles.map(c => parseFloat(c[4]));
   const high = candles.map(c => parseFloat(c[2]));
   const low = candles.map(c => parseFloat(c[3]));
-  const close = candles.map(c => parseFloat(c[4]));
   const vol = candles.map(c => parseFloat(c[5]));
+  const lastPrice = close[close.length - 1];
 
-  // VWAP Simple
-  let sumTypicalPriceVol = 0, sumVol = 0;
-  candles.forEach(c => {
-    const tp = (parseFloat(c[2]) + parseFloat(c[3]) + parseFloat(c[4])) / 3;
-    const v = parseFloat(c[5]);
-    sumTypicalPriceVol += tp * v;
-    sumVol += v;
-  });
-  const vwap = sumTypicalPriceVol / sumVol;
+  // 2. Lógica de Squeeze (Bandas de Bollinger vs Keltner)
+  const sma20 = calculateSMA(close, 20);
+  const stdDev = calculateStdDev(close, 20, sma20);
+  const atr20 = calculateATR(high, low, close, 20);
+  const isSqueeze = stdDev < (atr20 * 1.5);
 
-  // ATR (14 periodos)
-  let trSum = 0;
-  for(let i=candles.length-14; i<candles.length; i++) {
-    trSum += Math.max(high[i]-low[i], Math.abs(high[i]-close[i-1] || 0), Math.abs(low[i]-close[i-1] || 0));
+  // 3. CVD Divergence (Delta de Volumen Acumulado - Estimado)
+  let cvdDelta = 0;
+  for(let i = candles.length - 10; i < candles.length; i++) {
+    const cOpen = parseFloat(candles[i][1]), cClose = parseFloat(candles[i][4]), cVol = parseFloat(candles[i][5]);
+    cvdDelta += (cClose > cOpen ? 1 : -1) * cVol;
   }
-  const atr = trSum / 14;
+  let cvdStatus = "NEUTRAL";
+  if (close[close.length-1] < close[close.length-10] && cvdDelta > 0) cvdStatus = "BULLISH_ABSORPTION";
+  if (close[close.length-1] > close[close.length-10] && cvdDelta < 0) cvdStatus = "BEARISH_ABSORPTION";
 
-  // Presión Compra/Venta
-  const bids = orderBook.bids.reduce((a, b) => a + parseFloat(b[1]), 0);
-  const asks = orderBook.asks.reduce((a, b) => a + parseFloat(b[1]), 0);
-  const buyPressure = (bids / (bids + asks) * 100).toFixed(1);
+  // 4. Ciclo Wyckoff y Sesión
+  const now = new Date();
+  const hour = now.getUTCHours();
+  let session = "ASIA";
+  if (hour >= 8 && hour < 16) session = "LONDRES";
+  else if (hour >= 13 && hour < 21) session = "NUEVA YORK";
 
-  // Liquidación Estimada
-  const liqShorts = (lastClose * 1.012).toFixed(symbol.includes("USDT") ? 2 : 4);
-  const liqLongs = (lastClose * 0.988).toFixed(symbol.includes("USDT") ? 2 : 4);
+  let phase = "MARKUP";
+  if (isSqueeze) phase = "ACUMULACIÓN (WYCKOFF)";
+  else if (futures.funding < -0.01) phase = "POTENCIAL SHORT SQUEEZE";
+  else if (futures.funding > 0.01) phase = "DISTRIBUCIÓN / RIESGO LONG";
 
-  // RVOL
-  const avgVol = vol.slice(-21, -1).reduce((a,b)=>a+b, 0) / 20;
-  const rvol = vol[vol.length-1] / (avgVol || 1);
+  // 5. Plan Cuantitativo ATR
+  const atr14 = calculateATR(high, low, close, 14);
+  const sl = (lastPrice - (atr14 * 1.5)).toFixed(2);
+  const tp1 = (lastPrice + (atr14 * 2)).toFixed(2);
+  const tp2 = (lastPrice + (atr14 * 4)).toFixed(2);
 
   return {
-    symbol,
-    price: lastClose,
-    rvol: rvol.toFixed(2),
-    vwap: vwap.toFixed(symbol.includes("USDT") ? 2 : 4),
-    buyPressure: buyPressure + "%",
-    sellPressure: (100 - buyPressure).toFixed(1) + "%",
-    fundingRate: futuresData.fundingRate,
-    openInterest: futuresData.openInterest,
-    liqZoneShorts: liqShorts,
-    liqZoneLongs: liqLongs,
-    plan: {
-      entry: lastClose,
-      sl: (lastClose - (atr * 1.5)).toFixed(symbol.includes("USDT") ? 2 : 4),
-      tp1: (lastClose + (atr * 1.5)).toFixed(symbol.includes("USDT") ? 2 : 4),
-      tp2: (lastClose + (atr * 3)).toFixed(symbol.includes("USDT") ? 2 : 4)
-    },
-    signal: rvol > 1.8 && lastClose > vwap ? "BUY" : (rvol > 1.8 && lastClose < vwap ? "SELL" : "HOLD")
+    symbol, price: lastPrice,
+    rvol: (parseFloat(ticker24h.volume) / (vol.slice(-24).reduce((a,b)=>a+b,0) * 10)).toFixed(2),
+    funding: (futures.funding * 100).toFixed(4) + "%",
+    oi: futures.oi.toLocaleString(),
+    oiChange: futures.oiChange.toFixed(2) + "%",
+    isSqueeze, phase, cvdStatus, session,
+    liqShorts: (lastPrice * 1.012).toFixed(2),
+    liqLongs: (lastPrice * 0.988).toFixed(2),
+    plan: { entry: lastPrice, sl, tp1, tp2 },
+    regime: isSqueeze ? "COMPRESIÓN (BOMBA)" : "FLUJO ACTIVO"
   };
+}
+
+function calculateSMA(data, period) {
+  return data.slice(-period).reduce((a, b) => a + b, 0) / period;
+}
+
+function calculateStdDev(data, period, sma) {
+  const slice = data.slice(-period);
+  return Math.sqrt(slice.map(x => Math.pow(x - sma, 2)).reduce((a, b) => a + b) / period);
+}
+
+function calculateATR(h, l, c, p) {
+  let trs = [];
+  for(let i=1; i<h.length; i++) {
+    trs.push(Math.max(h[i]-l[i], Math.abs(h[i]-c[i-1]), Math.abs(l[i]-c[i-1])));
+  }
+  return trs.slice(-p).reduce((a,b)=>a+b, 0) / p;
 }
 
 async function fetchBinance(url) {
   const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
-  if (!r.ok) throw new Error(`API Error`);
+  if (!r.ok) throw new Error(`Binance API Error`);
   return await r.json();
 }
 
@@ -130,125 +144,112 @@ async function handleDashboard() {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Volumen-369 ELITE</title>
+    <title>Volumen-369 ELITE FINAL</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body { background: #0b0e11; color: #ffffff; font-family: 'Inter', sans-serif; }
-        .card { background: #1e2329; border: 1px solid #474d57; border-radius: 12px; padding: 20px; height: 100%; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
-        .metric-label { color: #b7bdc6; font-size: 0.8rem; text-transform: uppercase; font-weight: 500; margin-bottom: 4px; }
-        .metric-value { font-size: 1.4rem; font-weight: 700; color: #f0b90b; }
-        .BUY { color: #0ecb81 !important; font-weight: 800; }
-        .SELL { color: #f6465d !important; font-weight: 800; }
-        .HOLD { color: #848e9c !important; }
-        .chart-container { height: 500px; border-radius: 12px; overflow: hidden; border: 1px solid #474d57; background: #161a1e; }
-        .search-box { background: #2b3139; border: 1px solid #474d57; color: #ffffff; padding: 10px 20px; border-radius: 25px; width: 280px; font-weight: 500; }
-        .search-box::placeholder { color: #848e9c; }
-        .liq-box { border-left: 4px solid #f0b90b; background: rgba(240, 185, 11, 0.1); padding: 12px; margin-top: 10px; border-radius: 0 8px 8px 0; }
-        .liq-box-long { border-left: 4px solid #f6465d; background: rgba(246, 70, 93, 0.1); }
-        .btn-update { background: #f0b90b; color: #000000; border-radius: 25px; font-weight: 700; padding: 10px 25px; transition: all 0.2s; border: none; }
-        .btn-update:hover { background: #dcb000; transform: scale(1.05); }
-        .plan-val { color: #ffffff; font-weight: 600; font-size: 1.1rem; }
-        hr { border-color: #474d57; opacity: 0.3; }
+        :root { --bg: #0b0e11; --card: #1e2329; --yellow: #f0b90b; --green: #0ecb81; --red: #f6465d; --text: #ffffff; --muted: #b7bdc6; }
+        body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; }
+        .card { background: var(--card); border: 1px solid #474d57; border-radius: 12px; padding: 20px; box-shadow: 0 8px 16px rgba(0,0,0,0.5); }
+        
+        /* VISIBILIDAD DE TEXTOS */
+        .metric-label { color: var(--muted); font-size: 0.8rem; text-transform: uppercase; font-weight: 700; letter-spacing: 0.5px; }
+        .metric-value { font-size: 1.6rem; font-weight: 900; color: var(--yellow); text-shadow: 0 2px 4px rgba(0,0,0,0.5); }
+        .metric-sub { font-size: 1.1rem; font-weight: 700; color: #fff; }
+        
+        .BUY, .bullish { color: var(--green) !important; font-weight: 900; }
+        .SELL, .bearish { color: var(--red) !important; font-weight: 900; }
+        
+        .search-box { background: #2b3139; border: 2px solid #474d57; color: #fff; padding: 12px 20px; border-radius: 30px; width: 320px; font-weight: 700; outline: none; }
+        .search-box:focus { border-color: var(--yellow); }
+        
+        .status-pill { padding: 5px 15px; border-radius: 30px; font-size: 0.75rem; font-weight: 800; background: #2b3139; border: 1px solid #474d57; color: var(--yellow); }
+        .squeeze-active { background: rgba(240, 185, 11, 0.25); border-color: var(--yellow); color: var(--yellow); box-shadow: 0 0 15px rgba(240, 185, 11, 0.3); }
+        
+        .liq-zone { padding: 15px; border-radius: 10px; margin-top: 10px; border-left: 5px solid; }
+        .liq-shorts { background: rgba(14, 203, 129, 0.15); border-color: var(--green); }
+        .liq-longs { background: rgba(246, 70, 93, 0.15); border-color: var(--red); }
+        
+        .chart-container { height: 500px; border-radius: 12px; overflow: hidden; border: 1px solid #474d57; }
     </style>
 </head>
 <body>
     <div class="container-fluid p-4">
-        <!-- Header -->
+        <!-- HEADER -->
         <div class="d-flex justify-content-between align-items-center mb-4">
-            <h3 class="m-0">🚀 Volumen-369 <span class="badge bg-warning text-dark" style="font-size: 0.4em;">ELITE</span></h3>
-            <div class="d-flex gap-2">
-                <input type="text" id="symbolInput" class="search-box" placeholder="Ej: BTCUSDT, SOLUSDT..." onkeypress="if(event.key==='Enter') updateSymbol()">
-                <button onclick="updateSymbol()" class="btn btn-update">BUSCAR</button>
+            <h3 class="m-0 fw-bold">🚀 Volumen-369 <span class="badge bg-warning text-dark">ELITE FINAL</span></h3>
+            <div class="d-flex gap-3 align-items-center">
+                <div id="sessionPill" class="status-pill">SESIÓN: ---</div>
+                <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO (EJ: BTCUSDT)" onkeypress="if(event.key==='Enter') updateSymbol()">
             </div>
         </div>
 
-        <div class="row g-3">
-            <!-- Columna Izquierda: Gráfico -->
+        <div class="row g-4">
+            <!-- GRÁFICO -->
             <div class="col-lg-8">
                 <div class="chart-container" id="tv_chart"></div>
-                
-                <div class="row g-3 mt-1">
-                    <div class="col-md-12">
-                        <div class="card">
-                            <h6 class="metric-label">🎯 Plan Cuantitativo ATR (Gestión de Riesgo)</h6>
-                            <div class="d-flex justify-content-between text-center mt-2">
-                                <div><div class="metric-label">Entrada</div><div id="planEntry" class="plan-val">---</div></div>
-                                <div><div class="metric-label text-danger">Stop Loss</div><div id="planSL" class="SELL plan-val">---</div></div>
-                                <div><div class="metric-label text-success">Target 1</div><div id="planTP1" class="BUY plan-val">---</div></div>
-                                <div><div class="metric-label text-success">Target 2</div><div id="planTP2" class="BUY plan-val">---</div></div>
-                            </div>
-                        </div>
+                <!-- PLAN CUANTITATIVO -->
+                <div class="card mt-4">
+                    <h6 class="metric-label">🎯 Plan de Gestión Institucional (ATR 2.0)</h6>
+                    <div class="row text-center mt-3">
+                        <div class="col-3"><div class="metric-label">ENTRADA</div><div id="planEntry" class="metric-sub">---</div></div>
+                        <div class="col-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="SELL metric-sub">---</div></div>
+                        <div class="col-3"><div class="metric-label text-success">TAKE PROFIT 1</div><div id="planTP1" class="BUY metric-sub">---</div></div>
+                        <div class="col-3"><div class="metric-label text-success">TAKE PROFIT 2</div><div id="planTP2" class="BUY metric-sub">---</div></div>
                     </div>
                 </div>
             </div>
 
-            <!-- Columna Derecha: Métricas Pro -->
+            <!-- MÉTRICAS SMART MONEY -->
             <div class="col-lg-4">
-                <div class="row g-3">
+                <div class="row g-4">
+                    <!-- PRECIO Y FASE -->
                     <div class="col-12">
                         <div class="card">
                             <div class="d-flex justify-content-between">
                                 <div>
-                                    <div class="metric-label">Precio <span id="curSymbol">BTCUSDT</span></div>
-                                    <div id="price" class="metric-value" style="font-size: 1.8rem;">---</div>
+                                    <div class="metric-label">PRECIO <span id="curSymbol" class="text-white">BTCUSDT</span></div>
+                                    <div id="price" class="metric-value">---</div>
                                 </div>
                                 <div class="text-end">
-                                    <div class="metric-label">Señal</div>
-                                    <div id="signal" class="h5">HOLD</div>
+                                    <div id="squeezeBadge" class="status-pill mb-2">VOLATILIDAD NORMAL</div>
+                                    <div class="metric-label">FASE WYCKOFF</div>
+                                    <div id="phase" class="metric-sub">---</div>
                                 </div>
                             </div>
+                            <hr>
+                            <div class="row">
+                                <div class="col-6"><div class="metric-label">RVOL (MANOS FUERTES)</div><div id="rvol" class="metric-sub">---</div></div>
+                                <div class="col-6"><div class="metric-label">CVD DIVERGENCIA</div><div id="divergence" class="metric-sub">---</div></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- FUTUROS -->
+                    <div class="col-12">
+                        <div class="card">
+                            <h6 class="metric-label">FUTUROS Y SENTIMIENTO (SMART MONEY)</h6>
                             <div class="row mt-3">
-                                <div class="col-6">
-                                    <div class="metric-label">RVOL (Volumen)</div>
-                                    <div id="rvol">---</div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="metric-label">VWAP (Inst)</div>
-                                    <div id="vwap">---</div>
-                                </div>
+                                <div class="col-6"><div class="metric-label">FUNDING RATE</div><div id="funding" class="metric-sub">---</div></div>
+                                <div class="col-6"><div class="metric-label">OPEN INTEREST</div><div id="oi" class="metric-sub">---</div></div>
+                            </div>
+                            <div class="mt-3">
+                                <div class="metric-label">CAMBIO OI (5M)</div>
+                                <div id="oiChange" class="metric-value">---</div>
                             </div>
                         </div>
                     </div>
 
+                    <!-- LIQUIDEZ -->
                     <div class="col-12">
                         <div class="card">
-                            <div class="metric-label">Presión de Compra / Venta (Order Book)</div>
-                            <div class="progress mt-2" style="height: 20px; background: #f6465d; border-radius: 10px;">
-                                <div id="pressureBar" class="progress-bar bg-success" style="width: 50%"></div>
+                            <h6 class="metric-label">IMANES DE LIQUIDACIÓN (TARGETS)</h6>
+                            <div class="liq-zone liq-shorts">
+                                <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (IMÁN)</div>
+                                <div id="liqShorts" class="BUY metric-sub">---</div>
                             </div>
-                            <div class="d-flex justify-content-between mt-1" style="font-size: 0.75rem;">
-                                <span id="buyText">---</span>
-                                <span id="sellText">---</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="col-12">
-                        <div class="card">
-                            <div class="metric-label">Datos de Futuros</div>
-                            <div class="row mt-2">
-                                <div class="col-6">
-                                    <div class="metric-label">Funding Rate</div>
-                                    <div id="funding" style="color: #fff;">---</div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="metric-label">Open Interest</div>
-                                    <div id="oi" style="color: #fff;">---</div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="col-12">
-                        <div class="card">
-                            <div class="metric-label">Mapa de Liquidación (Imanes)</div>
-                            <div class="liq-box">
-                                <small class="metric-label">Zona Shorts (Barrida Arriba)</small><br>
-                                <span id="liqShorts" class="BUY" style="font-size: 1.1rem;">---</span>
-                            </div>
-                            <div class="liq-box liq-box-long mt-2">
-                                <small class="metric-label">Zona Longs (Barrida Abajo)</small><br>
-                                <span id="liqLongs" class="SELL" style="font-size: 1.1rem;">---</span>
+                            <div class="liq-zone liq-longs">
+                                <div class="metric-label text-danger">LIQUIDACIÓN DE LONGS (IMÁN)</div>
+                                <div id="liqLongs" class="SELL metric-sub">---</div>
                             </div>
                         </div>
                     </div>
@@ -257,81 +258,50 @@ async function handleDashboard() {
         </div>
     </div>
 
-    <!-- TradingView Widget -->
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
         let currentSymbol = "BTCUSDT";
-        let widget = null;
-
-        function initChart(symbol) {
-            widget = new TradingView.widget({
-                "autosize": true,
-                "symbol": "BINANCE:" + symbol,
-                "interval": "5",
-                "timezone": "Etc/UTC",
-                "theme": "dark",
-                "style": "1",
-                "locale": "es",
-                "toolbar_bg": "#f1f3f6",
-                "enable_publishing": false,
-                "hide_top_toolbar": false,
-                "save_image": false,
-                "container_id": "tv_chart",
-                "studies": [
-                    "VWAP@tv-basicstudies",
-                    "MASimple@tv-basicstudies"
-                ]
+        function initChart(s) {
+            new TradingView.widget({
+                "autosize": true, "symbol": "BINANCE:" + s, "interval": "5", "theme": "dark", "style": "1",
+                "container_id": "tv_chart", "studies": ["VWAP@tv-basicstudies", "MASimple@tv-basicstudies"]
             });
         }
 
         async function updateSymbol() {
             const input = document.getElementById('symbolInput').value.toUpperCase();
             if(!input) return;
-            
-            const check = await fetch(\`/api/check-symbol?symbol=\${input}\`);
-            const res = await check.json();
-            
-            if(res.exists) {
-                currentSymbol = input;
-                initChart(currentSymbol);
-                loadProData();
-                document.getElementById('symbolInput').value = "";
-            } else {
-                alert("Símbolo no encontrado en Binance. Usa formato BTCUSDT");
-            }
+            const res = await (await fetch(\`/api/check-symbol?symbol=\${input}\`)).json();
+            if(res.exists) { currentSymbol = input; initChart(input); loadData(); document.getElementById('symbolInput').value = ""; }
+            else { alert("Moneda no encontrada en Binance."); }
         }
 
-        async function loadProData() {
-            try {
-                const r = await fetch(\`/api/pro-analysis?symbol=\${currentSymbol}\`);
-                const d = await r.json();
-
-                document.getElementById('curSymbol').innerText = d.symbol;
-                document.getElementById('price').innerText = d.price.toLocaleString();
-                document.getElementById('rvol').innerText = d.rvol + "x";
-                document.getElementById('vwap').innerText = d.vwap;
-                document.getElementById('signal').innerText = d.signal;
-                document.getElementById('signal').className = "h5 " + d.signal;
-                
-                document.getElementById('pressureBar').style.width = d.buyPressure;
-                document.getElementById('buyText').innerText = d.buyPressure + " Compra";
-                document.getElementById('sellText').innerText = d.sellPressure + " Venta";
-                
-                document.getElementById('funding').innerText = d.fundingRate;
-                document.getElementById('oi').innerText = d.openInterest;
-                document.getElementById('liqShorts').innerText = d.liqZoneShorts;
-                document.getElementById('liqLongs').innerText = d.liqZoneLongs;
-
-                document.getElementById('planEntry').innerText = d.plan.entry.toLocaleString();
-                document.getElementById('planSL').innerText = d.plan.sl;
-                document.getElementById('planTP1').innerText = d.plan.tp1;
-                document.getElementById('planTP2').innerText = d.plan.tp2;
-            } catch(e) {}
+        async function loadData() {
+            const d = await (await fetch(\`/api/pro-analysis?symbol=\${currentSymbol}\`)).json();
+            document.getElementById('price').innerText = d.price.toLocaleString();
+            document.getElementById('curSymbol').innerText = d.symbol;
+            document.getElementById('rvol').innerText = d.rvol + "x";
+            document.getElementById('phase').innerText = d.phase;
+            document.getElementById('funding').innerText = d.funding;
+            document.getElementById('oi').innerText = d.oi;
+            document.getElementById('oiChange').innerText = d.oiChange;
+            document.getElementById('oiChange').className = "metric-value " + (parseFloat(d.oiChange) > 0 ? "BUY" : "SELL");
+            document.getElementById('liqShorts').innerText = d.liqShorts;
+            document.getElementById('liqLongs').innerText = d.liqLongs;
+            document.getElementById('planEntry').innerText = d.plan.entry.toLocaleString();
+            document.getElementById('planSL').innerText = d.plan.sl;
+            document.getElementById('planTP1').innerText = d.plan.tp1;
+            document.getElementById('planTP2').innerText = d.plan.tp2;
+            document.getElementById('divergence').innerText = d.cvdStatus.replace('_', ' ');
+            document.getElementById('divergence').className = "metric-sub " + (d.cvdStatus.includes('BULL') ? "BUY" : (d.cvdStatus.includes('BEAR') ? "SELL" : ""));
+            document.getElementById('sessionPill').innerText = "SESIÓN: " + d.session;
+            
+            const sq = document.getElementById('squeezeBadge');
+            if(d.isSqueeze) { sq.innerText = "💥 SQUEEZE DETECTADO"; sq.className = "status-pill squeeze-active"; }
+            else { sq.innerText = "VOLATILIDAD NORMAL"; sq.className = "status-pill"; }
         }
 
-        initChart(currentSymbol);
-        loadProData();
-        setInterval(loadProData, 10000);
+        initChart(currentSymbol); loadData(); setInterval(loadData, 10000);
     </script>
 </body>
 </html>`;
