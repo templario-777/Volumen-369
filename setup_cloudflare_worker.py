@@ -32,17 +32,54 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     const target = url.searchParams.get("target");
-    if (!target) return new Response("Falta ?target=", {status: 400});
 
-    const init = {
-      method: request.method,
-      headers: request.headers,
-      redirect: "follow"
-    };
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      init.body = request.body;
+    if (!target) {
+      return new Response("Error: Falta el parámetro ?target=", { 
+        status: 400,
+        headers: { "Content-Type": "text/plain; charset=utf-8" }
+      });
     }
-    return fetch(target + url.pathname + url.search, init);
+
+    try {
+      const targetUrl = new URL(target);
+      const newSearch = new URLSearchParams(url.search);
+      newSearch.delete("target");
+      
+      targetUrl.pathname = url.pathname === "/" ? targetUrl.pathname : url.pathname;
+      targetUrl.search = newSearch.toString();
+
+      const headers = new Headers(request.headers);
+      headers.delete("host");
+      headers.delete("cf-connecting-ip");
+      headers.delete("cf-worker");
+      headers.delete("cf-ray");
+      headers.delete("cf-visitor");
+
+      const init = {
+        method: request.method,
+        headers,
+        redirect: "follow",
+      };
+
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        init.body = await request.arrayBuffer();
+      }
+
+      const response = await fetch(targetUrl.toString(), init);
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set("Access-Control-Allow-Origin", "*");
+      newHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      newHeaders.set("Access-Control-Allow-Headers", "*");
+
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      });
+
+    } catch (e) {
+      return new Response("Error de Proxy: " + e.message, { status: 500 });
+    }
   }
 }
 """

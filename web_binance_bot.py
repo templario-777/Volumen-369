@@ -77,17 +77,54 @@ export default {
   async fetch(request) {
     const url = new URL(request.url);
     const target = url.searchParams.get("target");
-    if (!target) return new Response("Falta ?target=", {status: 400});
 
-    const init = {
-      method: request.method,
-      headers: request.headers,
-      redirect: "follow"
-    };
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      init.body = request.body;
+    if (!target) {
+      return new Response("Error: Falta el parámetro ?target=", { 
+        status: 400,
+        headers: { "Content-Type": "text/plain; charset=utf-8" }
+      });
     }
-    return fetch(target + url.pathname + url.search, init);
+
+    try {
+      const targetUrl = new URL(target);
+      const newSearch = new URLSearchParams(url.search);
+      newSearch.delete("target");
+      
+      targetUrl.pathname = url.pathname === "/" ? targetUrl.pathname : url.pathname;
+      targetUrl.search = newSearch.toString();
+
+      const headers = new Headers(request.headers);
+      headers.delete("host");
+      headers.delete("cf-connecting-ip");
+      headers.delete("cf-worker");
+      headers.delete("cf-ray");
+      headers.delete("cf-visitor");
+
+      const init = {
+        method: request.method,
+        headers,
+        redirect: "follow",
+      };
+
+      if (request.method !== "GET" && request.method !== "HEAD") {
+        init.body = await request.arrayBuffer();
+      }
+
+      const response = await fetch(targetUrl.toString(), init);
+      const newHeaders = new Headers(response.headers);
+      newHeaders.set("Access-Control-Allow-Origin", "*");
+      newHeaders.set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+      newHeaders.set("Access-Control-Allow-Headers", "*");
+
+      return new Response(response.body, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: newHeaders
+      });
+
+    } catch (e) {
+      return new Response("Error de Proxy: " + e.message, { status: 500 });
+    }
   }
 }
 """
@@ -145,11 +182,9 @@ def crear_exchange():
             worker_url = st.session_state.get('worker_url', "")
 
         if worker_url:
-            proxy_url = f"{worker_url}?target=https://api.binance.com"
-            config['proxies'] = {
-                'http': proxy_url,
-                'https': proxy_url,
-            }
+            worker_url = worker_url.rstrip('/')
+            # Para ccxt, la forma más limpia es usar proxyUrl que concatena con la URL final
+            config['proxyUrl'] = f"{worker_url}?target="
             st.sidebar.success(f"🔗 Cloudflare Worker activo")
         else:
             st.sidebar.warning("⚠️ No hay Worker configurado. Usa el botón 'Crear Worker' en la barra lateral.")
@@ -329,6 +364,13 @@ def enviar_alerta_telegram(mensaje):
             return False
 
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        
+        # Usar el worker como proxy para Telegram también
+        worker_url = st.secrets.get("CLOUDFLARE_WORKER_URL", st.session_state.get('worker_url', ""))
+        if worker_url:
+            worker_url = worker_url.rstrip('/')
+            url = f"{worker_url}?target=https://api.telegram.org/bot{bot_token}/sendMessage"
+
         payload = {"chat_id": chat_id, "text": mensaje, "parse_mode": "Markdown"}
         r = requests.post(url, json=payload, timeout=10)
         return r.status_code == 200
@@ -348,16 +390,27 @@ def main():
 
         # Cloudflare Worker (ÚNICO)
         st.subheader("🔗 Cloudflare Worker")
+        worker_url_secret = st.secrets.get("CLOUDFLARE_WORKER_URL", "")
+        worker_url_actual = st.session_state.get('worker_url', worker_url_secret)
+        worker_url_input = st.text_input(
+            "Worker URL",
+            value=worker_url_actual,
+            placeholder="https://binance-proxy.tu-cuenta.workers.dev",
+            key="worker_url_sb"
+        ).strip()
+        if worker_url_input:
+            st.session_state.worker_url = worker_url_input
+
         if st.button("🔧 Crear Worker", type="primary"):
             resultado = crear_cloudflare_worker()
             if resultado:
                 st.success(f"✅ Worker listo: {resultado}")
 
-        worker_status = st.session_state.get('worker_url', "")
+        worker_status = st.session_state.get('worker_url', worker_url_secret)
         if worker_status:
             st.success(f"🔗 Worker: {worker_status[:40]}...")
         else:
-            st.warning("⚠️ Haz clic en 'Crear Worker' arriba")
+            st.warning("⚠️ Pega tu Worker URL o crea uno con el botón")
 
         st.markdown("---")
 
@@ -412,7 +465,7 @@ def main():
 
                 patron, fuerza = detectar_patron(df)
 
-                col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+                col1, col2, col3, col4 = st.columns([2, 1, 1, 1])
 
                 with col1:
                     st.markdown(f"""
@@ -423,6 +476,8 @@ def main():
                         Patrón: {patron} | Fuerza: {fuerza}%
                     </div>
                     """, unsafe_allow_html=True)
+                    # Añadir gráfico pequeño
+                    st.line_chart(df['close'].tail(20), height=100, use_container_width=True)
 
                 with col2:
                     st.metric("Precio", f"{df.iloc[-1]['close']:.6f}")
