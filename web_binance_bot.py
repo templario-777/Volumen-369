@@ -4,6 +4,15 @@ import pandas as pd
 import streamlit as st
 import requests
 from datetime import datetime
+import os
+
+# Cargar variables de entorno desde .env si existe
+if os.path.exists(".env"):
+    with open(".env") as f:
+        for line in f:
+            if "=" in line:
+                key, value = line.strip().split("=", 1)
+                os.environ[key] = value
 
 # =========================
 # CONFIGURACIÓN Y ESTILOS
@@ -33,9 +42,9 @@ if 'top_monedas' not in st.session_state:
 # CONEXIÓN (VÍA WORKER)
 # =========================
 def crear_exchange():
-    worker_url = st.secrets.get("CLOUDFLARE_WORKER_URL", "")
+    worker_url = os.getenv("CLOUDFLARE_WORKER_URL") or st.secrets.get("CLOUDFLARE_WORKER_URL", "")
     if not worker_url or "tu-cuenta" in worker_url:
-        st.sidebar.warning("⚠️ Configura 'CLOUDFLARE_WORKER_URL' en Secrets")
+        st.sidebar.warning("⚠️ Configura 'CLOUDFLARE_WORKER_URL' en .env o Secrets")
         return None
     
     config = {

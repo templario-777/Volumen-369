@@ -5,6 +5,14 @@ import os
 import requests
 from datetime import datetime
 
+# Cargar variables de entorno desde .env si existe
+if os.path.exists(".env"):
+    with open(".env") as f:
+        for line in f:
+            if "=" in line:
+                key, value = line.strip().split("=", 1)
+                os.environ[key] = value
+
 # =========================
 # CONFIGURACIÓN (Headless)
 # =========================

@@ -64,6 +64,15 @@ def crear_worker():
                 worker_url = f"https://volumen-369-bot.{account_id}.workers.dev"
                 print(f"✅ Bot desplegado exitosamente!")
                 print(f"🌐 URL del Bot: {worker_url}")
+                
+                # ACTUALIZACIÓN AUTOMÁTICA: Guardar la URL en el archivo .env
+                try:
+                    with open(".env", "a") as f:
+                        f.write(f"\nCLOUDFLARE_WORKER_URL={worker_url}\n")
+                    print("📝 URL guardada en .env")
+                except:
+                    pass
+
                 print("\n🔔 PASO IMPORTANTE:")
                 print("1. Ve a Cloudflare Dashboard -> Workers & Pages -> volumen-369-bot")
                 print("2. Ve a 'Triggers' -> 'Cron Triggers' -> 'Add Cron Trigger'")
