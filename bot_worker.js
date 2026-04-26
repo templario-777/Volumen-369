@@ -866,7 +866,7 @@ async function handleDashboard() {
     <style>
         :root { --bg: #0b0e11; --card: #1e2329; --yellow: #f0b90b; --green: #0ecb81; --red: #f6465d; --text: #ffffff; }
         body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-weight: 800; }
-        .card { background: var(--card); border: 3px solid #474d57; border-radius: 20px; padding: 30px; box-shadow: 0 15px 30px rgba(0,0,0,0.7); }
+        .card { background: var(--card); border: 3px solid #474d57; border-radius: 20px; padding: 30px; box-shadow: 0 15px 30px rgba(0,0,0,0.7); width: auto; max-width: 100%; min-width: 0; display: flex; flex-direction: column; }
         h1 { font-size: clamp(1.35rem, 3.2vw, 2.3rem); }
 
         .container-fluid { padding: clamp(12px, 2vw, 24px) !important; }
@@ -905,6 +905,8 @@ async function handleDashboard() {
         
         .gravity-bar { height: 12px; background: #2b3139; border-radius: 10px; margin-top: 10px; overflow: hidden; border: 1px solid #474d57; }
         .gravity-fill { height: 100%; background: var(--yellow); transition: 0.5s; box-shadow: 0 0 10px var(--yellow); }
+        .plan-head { display: flex; justify-content: space-between; align-items: center; gap: 14px; flex-wrap: wrap; }
+        .gravity-box { width: min(320px, 48vw); min-width: 0; }
         .mtf-table { width: 100%; margin-top: 10px; font-size: 0.95rem; }
         .mtf-table td { padding: 10px 8px; border-bottom: 1px solid rgba(71, 77, 87, 0.6); color: #ffffff; }
         .mtf-tag { font-weight: 900; color: #fff; }
@@ -922,17 +924,18 @@ async function handleDashboard() {
         .heat-legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; font-size: 0.82rem; color: #d5d9e0; font-weight: 800; }
         .pill { display:flex; align-items:center; justify-content:center; padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.18); }
         .heat-list { margin-top: 12px; display: grid; grid-template-columns: 1fr; gap: 10px; }
-        .heat-item { display:flex; align-items:center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.22)); color: #fff; font-weight: 900; font-size: 1rem; }
-        .heat-left { display:flex; align-items:center; gap: 10px; min-width: 0; }
+        .heat-item { display:flex; align-items:flex-start; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.22)); color: #fff; font-weight: 900; font-size: 1rem; flex-wrap: wrap; }
+        .heat-left { display:flex; align-items:center; gap: 10px; min-width: 0; flex: 1 1 220px; flex-wrap: wrap; }
         .tag { display:inline-flex; align-items:center; gap:6px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.25); font-size: 0.80rem; color: #fff; }
         .tag.tf { background: rgba(240,185,11,0.16); border-color: rgba(240,185,11,0.20); }
         .tag.kind { background: rgba(255,255,255,0.06); }
         .tag.side-demand { background: rgba(14,203,129,0.14); border-color: rgba(14,203,129,0.22); }
         .tag.side-supply { background: rgba(246,70,93,0.14); border-color: rgba(246,70,93,0.22); }
         .heat-price { font-weight: 950; font-size: 1.05rem; }
-        .heat-sub { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .heat-sub { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; white-space: normal; overflow-wrap: anywhere; }
         .heat-list-title { display:flex; align-items:center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.20); color: #fff; font-weight: 900; font-size: 0.92rem; }
         .heat-list-title small { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; }
+        .heat-table td, .heat-table th { overflow-wrap: anywhere; word-break: break-word; }
 
         @media (min-width: 1200px) {
           .heatmap { height: 360px; }
@@ -967,6 +970,12 @@ async function handleDashboard() {
           .search-box { border-width: 3px; }
           .mtf-table { font-size: 0.85rem; }
           .heat-legend { grid-template-columns: 1fr; }
+          .gravity-box { width: 100%; text-align: left; }
+        }
+
+        @media (max-width: 420px) {
+          .heat-item { flex-direction: column; align-items: stretch; }
+          .heat-left { flex: 1 1 auto; }
         }
     </style>
 </head>
@@ -981,12 +990,12 @@ async function handleDashboard() {
             <div class="area-prices">
                 <div class="prices-grid">
                     <div class="card" style="grid-area: plan;">
-                        <div class="d-flex justify-content-between align-items-center">
+                        <div class="plan-head">
                             <div>
                                 <h4 class="metric-label m-0">🎯 ENTRADA EN IMÁN DE LIQUIDACIÓN</h4>
                                 <div id="idea-pill" class="mt-2">BUSCANDO GRAVEDAD...</div>
                             </div>
-                            <div class="text-end" style="width: min(320px, 48vw);">
+                            <div class="text-end gravity-box">
                                 <div class="metric-label">FUERZA DE GRAVEDAD (<span id="gravitySource">---</span>)</div>
                                 <div class="gravity-bar"><div id="gravityFill" class="gravity-fill" style="width: 0%"></div></div>
                                 <div id="gravityPower" class="mt-1" style="color: var(--yellow);">---</div>
