@@ -148,6 +148,10 @@ async function getProAnalysis(symbol) {
     entryTf,
   });
 
+  const delta = computeDeltaDivergence(c15m, 20);
+  const slip = computeSlippagePredictor(depth, lastPrice, entrySide === "ABAJO" ? "BUY" : "SELL", symbol.includes("USDT") ? 100 : 100);
+  const cluster1d = computeVolumeCluster1D(c1d, entry, 120);
+
   return {
     symbol, price: lastPrice,
     gravitySource, gravityPower: gravityPower + "%",
@@ -162,6 +166,9 @@ async function getProAnalysis(symbol) {
     oi: futures.oi.toLocaleString(),
     oiChange: futures.oiChange.toFixed(2) + "%",
     sentiment,
+    delta,
+    slippage: slip,
+    cluster1d,
     plan: { 
       entry: entry.toFixed(fmtDp),
       sl: sl.toFixed(fmtDp),
@@ -494,6 +501,140 @@ function stdev(arr, period) {
   return Math.sqrt(variance);
 }
 
+function computeDeltaDivergence(candles, window) {
+  const len = candles.length;
+  const w = Math.max(5, Math.min(window, len - 1));
+  if (len < w + 1) {
+    return { status: "NEUTRAL", delta: 0, deltaChange: 0, priceChangePct: 0 };
+  }
+
+  let deltaSum = 0;
+  let deltaPrevSum = 0;
+  const start = len - w;
+  const prevStart = len - 2 * w;
+  const prevOk = prevStart >= 0;
+
+  for (let i = start; i < len; i++) {
+    const o = parseFloat(candles[i][1]);
+    const c = parseFloat(candles[i][4]);
+    const v = parseFloat(candles[i][5]);
+    deltaSum += (c >= o ? 1 : -1) * v;
+  }
+
+  if (prevOk) {
+    for (let i = prevStart; i < start; i++) {
+      const o = parseFloat(candles[i][1]);
+      const c = parseFloat(candles[i][4]);
+      const v = parseFloat(candles[i][5]);
+      deltaPrevSum += (c >= o ? 1 : -1) * v;
+    }
+  }
+
+  const deltaChange = prevOk ? (deltaSum - deltaPrevSum) : deltaSum;
+
+  const pNow = parseFloat(candles[len - 1][4]);
+  const pPast = parseFloat(candles[start][4]);
+  const priceChangePct = pPast !== 0 ? ((pNow - pPast) / pPast) * 100 : 0;
+
+  let status = "NEUTRAL";
+  if (priceChangePct < -0.15 && deltaChange > 0) status = "BULLISH_ABSORPTION";
+  if (priceChangePct > 0.15 && deltaChange < 0) status = "BEARISH_ABSORPTION";
+
+  return {
+    status,
+    delta: deltaSum,
+    deltaChange,
+    priceChangePct
+  };
+}
+
+function computeSlippagePredictor(depth, midPrice, side, notional) {
+  const bid0 = depth.bids && depth.bids.length ? parseFloat(depth.bids[0][0]) : null;
+  const ask0 = depth.asks && depth.asks.length ? parseFloat(depth.asks[0][0]) : null;
+  const mid = (bid0 != null && ask0 != null) ? (bid0 + ask0) / 2 : midPrice;
+  const spreadPct = (bid0 != null && ask0 != null && mid) ? ((ask0 - bid0) / mid) * 100 : 0;
+
+  const qtyTarget = mid ? (notional / mid) : 0;
+  let qtyFilled = 0;
+  let cost = 0;
+  let avg = mid;
+
+  const book = side === "BUY" ? (depth.asks || []) : (depth.bids || []);
+  for (let i = 0; i < book.length && qtyFilled < qtyTarget; i++) {
+    const px = parseFloat(book[i][0]);
+    const q = parseFloat(book[i][1]);
+    const take = Math.min(q, qtyTarget - qtyFilled);
+    qtyFilled += take;
+    cost += take * px;
+  }
+  if (qtyFilled > 0) avg = cost / qtyFilled;
+
+  const slippagePct = mid ? (side === "BUY" ? ((avg - mid) / mid) * 100 : ((mid - avg) / mid) * 100) : 0;
+  const maxAllowedPct = 0.05;
+  const abort = slippagePct > maxAllowedPct || spreadPct > 0.08;
+
+  return {
+    side,
+    notional,
+    spreadPct,
+    slippagePct,
+    maxAllowedPct,
+    abort
+  };
+}
+
+function computeVolumeCluster1D(candles, price, bins) {
+  const tps = [];
+  const vols = [];
+  for (const c of candles) {
+    const h = parseFloat(c[2]);
+    const l = parseFloat(c[3]);
+    const cl = parseFloat(c[4]);
+    const v = parseFloat(c[5]);
+    const tp = (h + l + cl) / 3;
+    if (Number.isFinite(tp) && Number.isFinite(v)) {
+      tps.push(tp);
+      vols.push(v);
+    }
+  }
+  if (!tps.length) {
+    return { level: "N/D", strength: 0, clusterPrice: null, distancePct: null };
+  }
+  let min = tps[0], max = tps[0];
+  for (const tp of tps) {
+    if (tp < min) min = tp;
+    if (tp > max) max = tp;
+  }
+  const range = max - min;
+  if (range <= 0) {
+    return { level: "N/D", strength: 0, clusterPrice: null, distancePct: null };
+  }
+  const binCount = Math.max(40, bins || 120);
+  const step = range / binCount;
+  const vb = Array(binCount).fill(0);
+  for (let i = 0; i < tps.length; i++) {
+    const idx = Math.max(0, Math.min(binCount - 1, Math.floor((tps[i] - min) / step)));
+    vb[idx] += vols[i];
+  }
+  let maxVol = 0;
+  for (const v of vb) if (v > maxVol) maxVol = v;
+  if (maxVol <= 0) {
+    return { level: "N/D", strength: 0, clusterPrice: null, distancePct: null };
+  }
+
+  const idxPrice = Math.max(0, Math.min(binCount - 1, Math.floor((price - min) / step)));
+  const localVol = vb[idxPrice];
+  const strength = localVol / maxVol;
+  const clusterPrice = min + step * (idxPrice + 0.5);
+  const distancePct = clusterPrice ? Math.abs(price - clusterPrice) / clusterPrice * 100 : null;
+
+  let level = "BAJO";
+  if (strength >= 0.75) level = "ALTO";
+  else if (strength >= 0.45) level = "MEDIO";
+
+  return { level, strength, clusterPrice, distancePct };
+}
+
 function pickMagnet(mtf, side) {
   const order = ["1d", "4h", "1h", "15m"];
   let best = { tf: order[order.length - 1], price: null, dominance: -1 };
@@ -663,6 +804,34 @@ async function handleDashboard() {
                     </div>
                     <div class="col-12">
                         <div class="card">
+                            <h5 class="metric-label text-center">FILTROS V6 (PRECISIÓN)</h5>
+                            <div class="row mt-3">
+                                <div class="col-12">
+                                    <div class="metric-label">Delta Divergence</div>
+                                    <div id="deltaStatus" class="h5" style="color:#fff;"></div>
+                                    <div id="deltaDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="row">
+                                <div class="col-12">
+                                    <div class="metric-label">Slippage Predictor</div>
+                                    <div id="slipStatus" class="h5" style="color:#fff;"></div>
+                                    <div id="slipDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="row">
+                                <div class="col-12">
+                                    <div class="metric-label">Volume Cluster 1D</div>
+                                    <div id="clusterLevel" class="h5" style="color:#fff;"></div>
+                                    <div id="clusterDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="card">
                             <h5 class="metric-label text-center">NIVELES DE ENTRADA ALGORÍTMICA (IMANES)</h5>
                             <div class="mtf-wrap">
                               <table class="mtf-table">
@@ -803,6 +972,18 @@ async function handleDashboard() {
             document.getElementById('buy1d').innerText = setCp('1d','buyPoc');
             document.getElementById('poc1d').innerText = setCp('1d','poc');
             document.getElementById('sell1d').innerText = setCp('1d','sellPoc');
+
+            const dd = d.delta || {};
+            document.getElementById('deltaStatus').innerText = dd.status || '---';
+            document.getElementById('deltaDetails').innerText = 'Δ: ' + (dd.deltaChange != null ? Number(dd.deltaChange).toLocaleString() : '---') + ' | Precio: ' + (dd.priceChangePct != null ? dd.priceChangePct.toFixed(2) : '---') + '%';
+
+            const sp = d.slippage || {};
+            document.getElementById('slipStatus').innerText = (sp.abort ? 'ABORTAR ENTRADA' : 'OK') + ' (' + (sp.side || '---') + ')';
+            document.getElementById('slipDetails').innerText = 'Spread: ' + (sp.spreadPct != null ? sp.spreadPct.toFixed(3) : '---') + '% | Slippage: ' + (sp.slippagePct != null ? sp.slippagePct.toFixed(3) : '---') + '% | Max: ' + (sp.maxAllowedPct != null ? sp.maxAllowedPct.toFixed(2) : '---') + '%';
+
+            const cl = d.cluster1d || {};
+            document.getElementById('clusterLevel').innerText = (cl.level || '---') + ' (Strength: ' + (cl.strength != null ? (cl.strength * 100).toFixed(0) : '---') + '%)';
+            document.getElementById('clusterDetails').innerText = 'Centro: ' + (cl.clusterPrice != null ? Number(cl.clusterPrice).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '---') + ' | Dist: ' + (cl.distancePct != null ? cl.distancePct.toFixed(2) : '---') + '%';
         }
 
         initChart(currentSymbol); loadData(); setInterval(loadData, 10000);
