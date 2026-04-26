@@ -868,6 +868,13 @@ async function handleDashboard() {
         body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-weight: 800; }
         .card { background: var(--card); border: 3px solid #474d57; border-radius: 20px; padding: 30px; box-shadow: 0 15px 30px rgba(0,0,0,0.7); }
         h1 { font-size: clamp(1.35rem, 3.2vw, 2.3rem); }
+
+        .main-grid { align-items: start; }
+        :root[data-layout="desktop"] .main-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; }
+        :root[data-layout="desktop"] .main-grid > .col-lg-8,
+        :root[data-layout="desktop"] .main-grid > .col-lg-4 { padding-left: 0 !important; padding-right: 0 !important; width: auto !important; max-width: none !important; }
+
+        .right-grid { display: flex; flex-direction: column; gap: 16px; }
         
         .metric-label { color: #d5d9e0; font-size: 1.02rem; text-transform: uppercase; letter-spacing: 1px; }
         .metric-value { font-size: clamp(1.9rem, 4.2vw, 2.9rem); font-weight: 900; color: var(--yellow); text-shadow: 0 0 15px rgba(240, 185, 11, 0.4); }
@@ -922,8 +929,6 @@ async function handleDashboard() {
         }
 
         :root[data-layout="desktop"] .container-fluid { max-width: 1500px; margin-left: auto; margin-right: auto; }
-        :root[data-layout="desktop"] .col-lg-8 { flex: 0 0 auto; width: 66.66666667%; }
-        :root[data-layout="desktop"] .col-lg-4 { flex: 0 0 auto; width: 33.33333333%; }
         :root[data-layout="desktop"] .heatmap { height: 360px; }
         :root[data-layout="desktop"] .heat-list { grid-template-columns: 1fr 1fr; }
         :root[data-layout="desktop"] .heat-price { font-size: 1.12rem; }
@@ -960,7 +965,7 @@ async function handleDashboard() {
             <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO (BTC, ETH...)" onkeypress="if(event.key==='Enter') updateSymbol()">
         </div>
 
-        <div class="row g-4">
+        <div class="row g-4 main-grid">
             <div class="col-lg-8">
                 <div class="chart-container" id="tv_chart"></div>
                 <!-- PLAN MAGNET GRAVITY -->
@@ -970,23 +975,23 @@ async function handleDashboard() {
                             <h4 class="metric-label m-0">🎯 ENTRADA EN IMÁN DE LIQUIDACIÓN</h4>
                             <div id="idea-pill" class="mt-2">BUSCANDO GRAVEDAD...</div>
                         </div>
-                        <div class="text-end" style="width: 300px;">
+                        <div class="text-end" style="width: min(320px, 48vw);">
                             <div class="metric-label">FUERZA DE GRAVEDAD (<span id="gravitySource">---</span>)</div>
                             <div class="gravity-bar"><div id="gravityFill" class="gravity-fill" style="width: 0%"></div></div>
                             <div id="gravityPower" class="mt-1" style="color: var(--yellow);">---</div>
                         </div>
                     </div>
                     <div class="row text-center mt-4">
-                    <div class="col-3"><div class="metric-label">ENTRADA (IMÁN)</div><div id="planEntry" class="plan-val mono" style="color: var(--yellow);">---</div><div id="planEntryTf" style="color:#d5d9e0; font-size:0.95rem;"></div></div>
-                        <div class="col-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="SELL plan-val">---</div></div>
-                        <div class="col-3"><div class="metric-label text-success">TARGET 1 (REBOTE)</div><div id="planTP1" class="BUY plan-val">---</div></div>
-                    <div class="col-3"><div class="metric-label text-warning">TARGET 2 (IMÁN OPUESTO)</div><div id="planTP2" class="plan-val mono" style="color: #fff;">---</div><div id="planTargetTf" style="color:#d5d9e0; font-size:0.95rem;"></div></div>
+                    <div class="col-6 col-md-3"><div class="metric-label">ENTRADA (IMÁN)</div><div id="planEntry" class="plan-val mono" style="color: var(--yellow);">---</div><div id="planEntryTf" style="color:#d5d9e0; font-size:0.95rem;"></div></div>
+                        <div class="col-6 col-md-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="SELL plan-val">---</div></div>
+                        <div class="col-6 col-md-3 mt-3 mt-md-0"><div class="metric-label text-success">TARGET 1 (REBOTE)</div><div id="planTP1" class="BUY plan-val">---</div></div>
+                    <div class="col-6 col-md-3 mt-3 mt-md-0"><div class="metric-label text-warning">TARGET 2 (IMÁN OPUESTO)</div><div id="planTP2" class="plan-val mono" style="color: #fff;">---</div><div id="planTargetTf" style="color:#d5d9e0; font-size:0.95rem;"></div></div>
                     </div>
                 </div>
             </div>
 
             <div class="col-lg-4">
-                <div class="row g-4">
+                <div class="row g-4 right-grid">
                     <div class="col-12">
                         <div class="card text-center">
                             <div class="metric-label">PRECIO ACTUAL <span id="curSymbol" class="text-white">BTCUSDT</span></div>
@@ -1160,7 +1165,7 @@ async function handleDashboard() {
                 if (w <= 700 && coarse) device = 'mobile';
                 document.documentElement.setAttribute('data-device', device);
 
-                const layout = (device === 'desktop' && w >= 900) ? 'desktop' : 'mobile';
+                const layout = (device === 'desktop' && (w >= 900 || screenW >= 1200) && w >= 720) ? 'desktop' : 'mobile';
                 document.documentElement.setAttribute('data-layout', layout);
             }
 
