@@ -85,6 +85,20 @@ async function getProAnalysis(symbol) {
     "1d": computeVolumeProfile(c1d, lastPrice, 90),
   };
 
+  const cp = {
+    "15m": computeChartPrimeProfile(c15m, 200, 90),
+    "1h": computeChartPrimeProfile(c1h, 200, 90),
+    "4h": computeChartPrimeProfile(c4h, 200, 90),
+    "1d": computeChartPrimeProfile(c1d, 200, 90),
+  };
+
+  const sd = {
+    "15m": computeSupplyDemandZones(c15m, 200),
+    "1h": computeSupplyDemandZones(c1h, 200),
+    "4h": computeSupplyDemandZones(c4h, 200),
+    "1d": computeSupplyDemandZones(c1d, 200),
+  };
+
   const mtf = Object.fromEntries(Object.entries(profiles).map(([tf, p]) => ([
     tf,
     {
@@ -100,8 +114,15 @@ async function getProAnalysis(symbol) {
   const entryPick = pickMagnet(mtf, entrySide);
   const oppPick = pickMagnet(mtf, entrySide === "ABAJO" ? "ARRIBA" : "ABAJO");
 
-  const entry = entryPick.price ?? lastPrice;
-  const tp2 = oppPick.price ?? (entrySide === "ABAJO" ? (lastPrice * 1.02) : (lastPrice * 0.98));
+  const entryFromZones = pickEntryFromZones(sd, entrySide, lastPrice);
+  const entry = (entryFromZones && entryFromZones.price != null) ? entryFromZones.price : (entryPick.price ?? lastPrice);
+  const entryTf = (entryFromZones && entryFromZones.tf) ? entryFromZones.tf : entryPick.tf;
+
+  const tp2FromZones = pickEntryFromZones(sd, entrySide === "ABAJO" ? "ARRIBA" : "ABAJO", lastPrice);
+  const tp2 = (tp2FromZones && tp2FromZones.price != null)
+    ? tp2FromZones.price
+    : (oppPick.price ?? (entrySide === "ABAJO" ? (lastPrice * 1.02) : (lastPrice * 0.98)));
+  const targetTf = (tp2FromZones && tp2FromZones.tf) ? tp2FromZones.tf : oppPick.tf;
 
   const atr15m = calculateATR(
     c15m.map(c => parseFloat(c[2])),
@@ -112,11 +133,11 @@ async function getProAnalysis(symbol) {
   const slDist = Math.max(atr15m * 1.25, entry * 0.0035);
   const sl = (entrySide === "ABAJO" ? (entry - slDist) : (entry + slDist));
 
-  const tp1 = profiles["15m"].poc ?? lastPrice;
+  const tp1 = cp["15m"].poc ?? profiles["15m"].poc ?? lastPrice;
 
   const idea = entrySide === "ABAJO"
-    ? `ENTRAR EN IMÁN ABAJO (${entryPick.tf}) Y BUSCAR BARRIDA ARRIBA (${oppPick.tf})`
-    : `ENTRAR EN IMÁN ARRIBA (${entryPick.tf}) Y BUSCAR BARRIDA ABAJO (${oppPick.tf})`;
+    ? `ENTRAR EN IMÁN ABAJO (${entryTf}) Y BUSCAR BARRIDA ARRIBA (${targetTf})`
+    : `ENTRAR EN IMÁN ARRIBA (${entryTf}) Y BUSCAR BARRIDA ABAJO (${targetTf})`;
 
   const sentiment = buildSentiment({
     obImbalance,
@@ -124,7 +145,7 @@ async function getProAnalysis(symbol) {
     oiChange: futures.oiChange,
     dominance4h: profiles["4h"].dominance,
     entrySide,
-    entryTf: entryPick.tf,
+    entryTf,
   });
 
   return {
@@ -132,6 +153,8 @@ async function getProAnalysis(symbol) {
     gravitySource, gravityPower: gravityPower + "%",
     orderBookImbalance: (obImbalance * 100).toFixed(1) + "%",
     mtf,
+    chartPrime: cp,
+    supplyDemand: sd,
     liqShorts: (profiles["4h"].magnetUp ?? (lastPrice * 1.02)).toFixed(fmtDp),
     liqLongs: (profiles["4h"].magnetDown ?? (lastPrice * 0.98)).toFixed(fmtDp),
     idea,
@@ -144,8 +167,8 @@ async function getProAnalysis(symbol) {
       sl: sl.toFixed(fmtDp),
       tp1: tp1.toFixed(fmtDp),
       tp2: tp2.toFixed(fmtDp),
-      entryTf: entryPick.tf,
-      targetTf: oppPick.tf
+      entryTf,
+      targetTf
     }
   };
 }
@@ -240,6 +263,235 @@ function computeVolumeProfile(candles, currentPrice, bins) {
   const dominance = (upAgg + downAgg) > 0 ? Math.max(upAgg, downAgg) / (upAgg + downAgg) : 0;
 
   return { poc, magnetUp, magnetDown, dominant, dominance };
+}
+
+function computeChartPrimeProfile(candles, lookbackBars, binResolution) {
+  const lb = Math.min(lookbackBars, candles.length);
+  if (lb < 30) {
+    const last = candles.length ? parseFloat(candles[candles.length - 1][4]) : null;
+    return { poc: last, buyPoc: last, sellPoc: last, buyTotal: 0, sellTotal: 0 };
+  }
+
+  const closes = [];
+  for (let i = candles.length - lb; i < candles.length; i++) {
+    closes.push(parseFloat(candles[i][4]));
+  }
+  const dev = stdev(closes, Math.min(25, closes.length)) * 2;
+
+  const refs = [];
+  const vols = [];
+  for (let i = candles.length - lb; i < candles.length; i++) {
+    const o = parseFloat(candles[i][1]);
+    const h = parseFloat(candles[i][2]);
+    const l = parseFloat(candles[i][3]);
+    const c = parseFloat(candles[i][4]);
+    const v = parseFloat(candles[i][5]);
+    const ref = c > o ? (l - dev) : (h + dev);
+    if (Number.isFinite(ref) && Number.isFinite(v)) {
+      refs.push(ref);
+      vols.push(v);
+    }
+  }
+  if (!refs.length) {
+    const last = parseFloat(candles[candles.length - 1][4]);
+    return { poc: last, buyPoc: last, sellPoc: last, buyTotal: 0, sellTotal: 0 };
+  }
+  let min = refs[0], max = refs[0];
+  for (const r of refs) {
+    if (r < min) min = r;
+    if (r > max) max = r;
+  }
+  const range = max - min;
+  if (range <= 0) {
+    const last = parseFloat(candles[candles.length - 1][4]);
+    return { poc: last, buyPoc: last, sellPoc: last, buyTotal: 0, sellTotal: 0 };
+  }
+
+  const bins = Math.max(20, binResolution);
+  const step = range / bins;
+  const volumeBins = Array(bins).fill(0);
+  const lastClose = parseFloat(candles[candles.length - 1][4]);
+
+  for (let bar = 0; bar < refs.length; bar++) {
+    const ref = refs[bar];
+    const v = vols[bar];
+    const idx = Math.max(0, Math.min(bins - 1, Math.floor((ref - min) / step)));
+    const binMid = min + step * (idx + 0.5);
+    if (Math.abs(ref - binMid) <= step && !(Math.abs(lastClose - binMid) < step * 2)) {
+      volumeBins[idx] += v;
+    }
+  }
+
+  let maxVol = 0;
+  for (const v of volumeBins) {
+    if (v > maxVol) maxVol = v;
+  }
+  if (maxVol <= 0) {
+    return { poc: lastClose, buyPoc: lastClose, sellPoc: lastClose, buyTotal: 0, sellTotal: 0 };
+  }
+
+  let buyTotal = 0;
+  let sellTotal = 0;
+  let buyMax = -1;
+  let sellMax = -1;
+  let buyPoc = null;
+  let sellPoc = null;
+  let poc = null;
+  let pocMax = -1;
+
+  for (let i = 0; i < volumeBins.length; i++) {
+    const binMid = min + step * (i + 0.5);
+    const v = volumeBins[i];
+    if (v > pocMax) {
+      pocMax = v;
+      poc = binMid;
+    }
+    if (Math.abs(lastClose - binMid) < step * 2) continue;
+    if (lastClose < binMid) {
+      sellTotal += v;
+      if (v > sellMax) {
+        sellMax = v;
+        sellPoc = binMid;
+      }
+    } else {
+      buyTotal += v;
+      if (v > buyMax) {
+        buyMax = v;
+        buyPoc = binMid;
+      }
+    }
+  }
+
+  return {
+    poc,
+    buyPoc,
+    sellPoc,
+    buyTotal,
+    sellTotal,
+  };
+}
+
+function computeSupplyDemandZones(candles, atrPeriod) {
+  const len = candles.length;
+  if (len < 30) return { supply: [], demand: [] };
+
+  const high = candles.map(c => parseFloat(c[2]));
+  const low = candles.map(c => parseFloat(c[3]));
+  const close = candles.map(c => parseFloat(c[4]));
+  const open = candles.map(c => parseFloat(c[1]));
+  const volume = candles.map(c => parseFloat(c[5]));
+
+  const atr = calculateATR(high, low, close, Math.min(atrPeriod, len - 1)) * 2;
+  const volLookback = Math.min(200, len);
+  const avgVol = volume.slice(-volLookback).reduce((a, b) => a + b, 0) / volLookback;
+
+  const supply = [];
+  const demand = [];
+
+  for (let j = len - 1; j >= 2; j--) {
+    const bear = close[j] < open[j];
+    const bull = close[j] > open[j];
+    const bear1 = close[j - 1] < open[j - 1];
+    const bear2 = close[j - 2] < open[j - 2];
+    const bull1 = close[j - 1] > open[j - 1];
+    const bull2 = close[j - 2] > open[j - 2];
+    const extraVolPrev = volume[j - 1] > avgVol;
+
+    if (bear && bear1 && bear2 && extraVolPrev) {
+      let delta = 0;
+      for (let k = 0; k <= 5 && (j - k) >= 0; k++) {
+        const idx = j - k;
+        const isBull = close[idx] > open[idx];
+        if (isBull) {
+          const bottom = low[idx];
+          const top = low[idx] + atr;
+          supply.push({ top, bottom, delta });
+          break;
+        }
+        const isBear = close[idx] < open[idx];
+        delta += isBear ? -volume[idx] : volume[idx];
+      }
+    }
+
+    if (bull && bull1 && bull2 && extraVolPrev) {
+      let delta = 0;
+      for (let k = 0; k <= 5 && (j - k) >= 0; k++) {
+        const idx = j - k;
+        const isBear = close[idx] < open[idx];
+        if (isBear) {
+          const top = high[idx];
+          const bottom = high[idx] - atr;
+          demand.push({ top, bottom, delta });
+          break;
+        }
+        const isBull = close[idx] > open[idx];
+        delta += isBull ? volume[idx] : -volume[idx];
+      }
+    }
+
+    if (supply.length >= 8 && demand.length >= 8) break;
+  }
+
+  const last = close[len - 1];
+  const cleanSupply = dedupeZones(supply.filter(z => !(last > z.top))).slice(0, 5);
+  const cleanDemand = dedupeZones(demand.filter(z => !(last < z.bottom))).slice(0, 5);
+
+  return { supply: cleanSupply, demand: cleanDemand };
+}
+
+function dedupeZones(zones) {
+  const out = [];
+  for (const z of zones) {
+    let overlapped = false;
+    for (const o of out) {
+      const overlap = z.bottom < o.top && z.top > o.bottom;
+      if (overlap) {
+        overlapped = true;
+        if (Math.abs(z.delta) > Math.abs(o.delta)) {
+          o.top = z.top;
+          o.bottom = z.bottom;
+          o.delta = z.delta;
+        }
+      }
+    }
+    if (!overlapped) out.push({ ...z });
+  }
+  return out;
+}
+
+function pickEntryFromZones(sd, side, currentPrice) {
+  const order = ["1d", "4h", "1h", "15m"];
+  let best = null;
+  for (const tf of order) {
+    const z = sd[tf];
+    if (!z) continue;
+    const list = side === "ABAJO" ? z.demand : z.supply;
+    if (!list || !list.length) continue;
+
+    let candidate = null;
+    let bestDist = Infinity;
+    for (const zone of list) {
+      const price = side === "ABAJO" ? zone.top : zone.bottom;
+      const dist = Math.abs(currentPrice - price);
+      if (dist < bestDist) {
+        bestDist = dist;
+        candidate = { tf, price };
+      }
+    }
+    if (candidate) {
+      best = candidate;
+      break;
+    }
+  }
+  return best;
+}
+
+function stdev(arr, period) {
+  const p = Math.max(2, Math.min(period, arr.length));
+  const slice = arr.slice(-p);
+  const mean = slice.reduce((a, b) => a + b, 0) / p;
+  const variance = slice.reduce((a, b) => a + Math.pow(b - mean, 2), 0) / p;
+  return Math.sqrt(variance);
 }
 
 function pickMagnet(mtf, side) {
@@ -415,10 +667,10 @@ async function handleDashboard() {
                             <div class="mtf-wrap">
                               <table class="mtf-table">
                                   <tbody>
-                                      <tr><td class="mtf-tag">15M</td><td>POC</td><td id="poc15m" class="mono"></td><td>⬆</td><td id="up15m" class="mono"></td><td>⬇</td><td id="dn15m" class="mono"></td></tr>
-                                      <tr><td class="mtf-tag">1H</td><td>POC</td><td id="poc1h" class="mono"></td><td>⬆</td><td id="up1h" class="mono"></td><td>⬇</td><td id="dn1h" class="mono"></td></tr>
-                                      <tr><td class="mtf-tag">4H</td><td>POC</td><td id="poc4h" class="mono"></td><td>⬆</td><td id="up4h" class="mono"></td><td>⬇</td><td id="dn4h" class="mono"></td></tr>
-                                      <tr><td class="mtf-tag">1D</td><td>POC</td><td id="poc1d" class="mono"></td><td>⬆</td><td id="up1d" class="mono"></td><td>⬇</td><td id="dn1d" class="mono"></td></tr>
+                                      <tr><td class="mtf-tag">15M</td><td>BPOC</td><td id="buy15m" class="mono"></td><td>POC</td><td id="poc15m" class="mono"></td><td>SPOC</td><td id="sell15m" class="mono"></td></tr>
+                                      <tr><td class="mtf-tag">1H</td><td>BPOC</td><td id="buy1h" class="mono"></td><td>POC</td><td id="poc1h" class="mono"></td><td>SPOC</td><td id="sell1h" class="mono"></td></tr>
+                                      <tr><td class="mtf-tag">4H</td><td>BPOC</td><td id="buy4h" class="mono"></td><td>POC</td><td id="poc4h" class="mono"></td><td>SPOC</td><td id="sell4h" class="mono"></td></tr>
+                                      <tr><td class="mtf-tag">1D</td><td>BPOC</td><td id="buy1d" class="mono"></td><td>POC</td><td id="poc1d" class="mono"></td><td>SPOC</td><td id="sell1d" class="mono"></td></tr>
                                   </tbody>
                               </table>
                             </div>
@@ -529,18 +781,28 @@ async function handleDashboard() {
                 const v = mtf[tf] && mtf[tf][key] != null ? mtf[tf][key] : null;
                 return v == null ? '---' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
             };
-            document.getElementById('poc15m').innerText = setMtf('15m','poc');
-            document.getElementById('up15m').innerText = setMtf('15m','magnetUp');
-            document.getElementById('dn15m').innerText = setMtf('15m','magnetDown');
-            document.getElementById('poc1h').innerText = setMtf('1h','poc');
-            document.getElementById('up1h').innerText = setMtf('1h','magnetUp');
-            document.getElementById('dn1h').innerText = setMtf('1h','magnetDown');
-            document.getElementById('poc4h').innerText = setMtf('4h','poc');
-            document.getElementById('up4h').innerText = setMtf('4h','magnetUp');
-            document.getElementById('dn4h').innerText = setMtf('4h','magnetDown');
-            document.getElementById('poc1d').innerText = setMtf('1d','poc');
-            document.getElementById('up1d').innerText = setMtf('1d','magnetUp');
-            document.getElementById('dn1d').innerText = setMtf('1d','magnetDown');
+
+            const cp = d.chartPrime || {};
+            const setCp = (tf, key) => {
+                const v = cp[tf] && cp[tf][key] != null ? cp[tf][key] : null;
+                return v == null ? '---' : Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
+            };
+
+            document.getElementById('buy15m').innerText = setCp('15m','buyPoc');
+            document.getElementById('poc15m').innerText = setCp('15m','poc');
+            document.getElementById('sell15m').innerText = setCp('15m','sellPoc');
+
+            document.getElementById('buy1h').innerText = setCp('1h','buyPoc');
+            document.getElementById('poc1h').innerText = setCp('1h','poc');
+            document.getElementById('sell1h').innerText = setCp('1h','sellPoc');
+
+            document.getElementById('buy4h').innerText = setCp('4h','buyPoc');
+            document.getElementById('poc4h').innerText = setCp('4h','poc');
+            document.getElementById('sell4h').innerText = setCp('4h','sellPoc');
+
+            document.getElementById('buy1d').innerText = setCp('1d','buyPoc');
+            document.getElementById('poc1d').innerText = setCp('1d','poc');
+            document.getElementById('sell1d').innerText = setCp('1d','sellPoc');
         }
 
         initChart(currentSymbol); loadData(); setInterval(loadData, 10000);
