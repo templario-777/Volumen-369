@@ -920,6 +920,12 @@ async function handleDashboard() {
           .heat-price { font-size: 1.12rem; }
         }
 
+        :root[data-device="desktop"] .heatmap { height: 360px; }
+        :root[data-device="desktop"] .heat-list { grid-template-columns: 1fr 1fr; }
+        :root[data-device="desktop"] .heat-price { font-size: 1.12rem; }
+        :root[data-device="desktop"] .card { padding: 26px; }
+        :root[data-device="desktop"] .search-box { font-size: 1.15rem; }
+
         @media (max-width: 992px) {
           .card { padding: 18px; border-radius: 16px; }
           .metric-value { font-size: 2.2rem; }
@@ -1124,6 +1130,28 @@ async function handleDashboard() {
 
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
+        (function() {
+            function detectDevice() {
+                const w = window.innerWidth || document.documentElement.clientWidth || 0;
+                const hasHover = window.matchMedia ? window.matchMedia('(hover: hover)').matches : false;
+                const fine = window.matchMedia ? window.matchMedia('(pointer: fine)').matches : false;
+                const coarse = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+
+                let device = 'mobile';
+                if ((hasHover && fine) || (!coarse && w >= 992)) device = 'desktop';
+                document.documentElement.setAttribute('data-device', device);
+            }
+
+            let t = null;
+            function onResize() {
+                if (t) clearTimeout(t);
+                t = setTimeout(detectDevice, 120);
+            }
+
+            detectDevice();
+            window.addEventListener('resize', onResize);
+        })();
+
         let currentSymbol = "BTCUSDT";
         let tvWidget = null;
         function initChart(s) {
