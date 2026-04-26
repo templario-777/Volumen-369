@@ -867,22 +867,23 @@ async function handleDashboard() {
         :root { --bg: #0b0e11; --card: #1e2329; --yellow: #f0b90b; --green: #0ecb81; --red: #f6465d; --text: #ffffff; }
         body { background: var(--bg); color: var(--text); font-family: 'Inter', sans-serif; font-weight: 800; }
         .card { background: var(--card); border: 3px solid #474d57; border-radius: 20px; padding: 30px; box-shadow: 0 15px 30px rgba(0,0,0,0.7); }
+        h1 { font-size: clamp(1.35rem, 3.2vw, 2.3rem); }
         
         .metric-label { color: #d5d9e0; font-size: 1.02rem; text-transform: uppercase; letter-spacing: 1px; }
-        .metric-value { font-size: 2.8rem; font-weight: 900; color: var(--yellow); text-shadow: 0 0 15px rgba(240, 185, 11, 0.4); }
-        .plan-val { font-size: 2.2rem; font-weight: 900; color: #fff; }
+        .metric-value { font-size: clamp(1.9rem, 4.2vw, 2.9rem); font-weight: 900; color: var(--yellow); text-shadow: 0 0 15px rgba(240, 185, 11, 0.4); }
+        .plan-val { font-size: clamp(1.45rem, 3.0vw, 2.2rem); font-weight: 900; color: #fff; }
         
         .BUY { color: var(--green) !important; }
         .SELL { color: var(--red) !important; }
         
-        .search-box { background: #2b3139; border: 4px solid var(--yellow); color: #fff; padding: 18px 30px; border-radius: 60px; width: min(450px, 100%); font-size: 1.1rem; outline: none; box-shadow: 0 0 20px rgba(240, 185, 11, 0.2); }
+        .search-box { background: #2b3139; border: 4px solid var(--yellow); color: #fff; padding: 14px 18px; border-radius: 60px; width: min(520px, 100%); font-size: clamp(0.95rem, 1.6vw, 1.15rem); outline: none; box-shadow: 0 0 20px rgba(240, 185, 11, 0.2); }
         .search-box::placeholder { color: rgba(255,255,255,0.65); }
         
         .liq-zone { padding: 25px; border-radius: 20px; margin-top: 20px; border: 4px solid; position: relative; overflow: hidden; }
         .liq-shorts { background: rgba(14, 203, 129, 0.15); border-color: var(--green); }
         .liq-longs { background: rgba(246, 70, 93, 0.15); border-color: var(--red); }
         
-        .chart-container { height: min(600px, 60vh); border-radius: 20px; overflow: hidden; border: 3px solid #474d57; }
+        .chart-container { height: clamp(380px, 60vh, 640px); border-radius: 20px; overflow: hidden; border: 3px solid #474d57; }
         #idea-pill { background: var(--yellow); color: #000; padding: 12px 25px; border-radius: 12px; font-size: 1.3rem; font-weight: 900; box-shadow: 0 5px 15px rgba(240, 185, 11, 0.4); }
         
         .gravity-bar { height: 12px; background: #2b3139; border-radius: 10px; margin-top: 10px; overflow: hidden; border: 1px solid #474d57; }
@@ -920,17 +921,16 @@ async function handleDashboard() {
           .heat-price { font-size: 1.12rem; }
         }
 
-        :root[data-device="desktop"] .heatmap { height: 360px; }
-        :root[data-device="desktop"] .heat-list { grid-template-columns: 1fr 1fr; }
-        :root[data-device="desktop"] .heat-price { font-size: 1.12rem; }
+        :root[data-layout="desktop"] .container-fluid { max-width: 1500px; margin-left: auto; margin-right: auto; }
+        :root[data-layout="desktop"] .col-lg-8 { flex: 0 0 auto; width: 66.66666667%; }
+        :root[data-layout="desktop"] .col-lg-4 { flex: 0 0 auto; width: 33.33333333%; }
+        :root[data-layout="desktop"] .heatmap { height: 360px; }
+        :root[data-layout="desktop"] .heat-list { grid-template-columns: 1fr 1fr; }
+        :root[data-layout="desktop"] .heat-price { font-size: 1.12rem; }
         :root[data-device="desktop"] .card { padding: 26px; }
-        :root[data-device="desktop"] .search-box { font-size: 1.15rem; }
-        :root[data-device="desktop"] .container-fluid { max-width: 1500px; margin-left: auto; margin-right: auto; }
-        :root[data-device="desktop"] .col-lg-8 { flex: 0 0 auto; width: 66.66666667%; }
-        :root[data-device="desktop"] .col-lg-4 { flex: 0 0 auto; width: 33.33333333%; }
-        :root[data-device="desktop"] .row { flex-wrap: wrap; }
 
-        .heat-table { width: 100%; border-collapse: separate; border-spacing: 0 10px; }
+        .heat-list.heat-table-mode { display: block; }
+        .heat-table { width: 100%; border-collapse: separate; border-spacing: 0 10px; table-layout: fixed; }
         .heat-table th { text-align: left; color: #d5d9e0; font-size: 0.78rem; font-weight: 900; letter-spacing: 1px; padding: 0 10px; }
         .heat-row { background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.22)); border: 1px solid rgba(255,255,255,0.10); border-radius: 14px; }
         .heat-table td { padding: 10px 10px; color: #fff; font-weight: 900; vertical-align: middle; }
@@ -940,19 +940,16 @@ async function handleDashboard() {
 
         @media (max-width: 992px) {
           .card { padding: 18px; border-radius: 16px; }
-          .metric-value { font-size: 2.2rem; }
-          .plan-val { font-size: 1.7rem; }
           #idea-pill { font-size: 1.05rem; padding: 10px 16px; }
-          .chart-container { height: 52vh; }
+          .chart-container { height: clamp(340px, 52vh, 520px); }
         }
 
         @media (max-width: 576px) {
           .metric-label { font-size: 0.85rem; }
-          .metric-value { font-size: 1.9rem; }
-          .plan-val { font-size: 1.45rem; }
-          .chart-container { height: 46vh; }
-          .search-box { font-size: 1rem; padding: 14px 18px; border-width: 3px; }
+          .chart-container { height: clamp(320px, 46vh, 460px); }
+          .search-box { border-width: 3px; }
           .mtf-table { font-size: 0.85rem; }
+          .heat-legend { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -1143,6 +1140,14 @@ async function handleDashboard() {
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
         (function() {
+            function isUaMobile() {
+                try {
+                    if (navigator.userAgentData && typeof navigator.userAgentData.mobile === 'boolean') return navigator.userAgentData.mobile;
+                } catch (e) {}
+                const ua = navigator.userAgent || '';
+                return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobi/i.test(ua);
+            }
+
             function detectDevice() {
                 const w = (window.visualViewport && window.visualViewport.width) ? window.visualViewport.width : (window.innerWidth || document.documentElement.clientWidth || 0);
                 const hasHover = window.matchMedia ? window.matchMedia('(hover: hover)').matches : false;
@@ -1150,9 +1155,13 @@ async function handleDashboard() {
                 const coarse = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
                 const screenW = (window.screen && window.screen.width) ? window.screen.width : 0;
 
-                let device = 'mobile';
-                if ((hasHover && fine) || (screenW >= 1024 && !coarse) || (!coarse && w >= 992)) device = 'desktop';
+                const uaMobile = isUaMobile();
+                let device = uaMobile ? 'mobile' : 'desktop';
+                if (w <= 700 && coarse) device = 'mobile';
                 document.documentElement.setAttribute('data-device', device);
+
+                const layout = (device === 'desktop' && w >= 900) ? 'desktop' : 'mobile';
+                document.documentElement.setAttribute('data-layout', layout);
             }
 
             let t = null;
@@ -1163,6 +1172,7 @@ async function handleDashboard() {
 
             detectDevice();
             window.addEventListener('resize', onResize);
+            if (window.visualViewport) window.visualViewport.addEventListener('resize', onResize);
         })();
 
         let currentSymbol = "BTCUSDT";
@@ -1642,6 +1652,7 @@ async function handleDashboard() {
 
                 const showTable = w >= 520;
                 if (showTable) {
+                    try { list.classList.add('heat-table-mode'); } catch (e) {}
                     const rows = [];
                     const header = '<thead><tr>'
                       + '<th>TF</th><th>NIVEL</th><th>LADO</th><th class="cell-right">PRECIO</th>'
@@ -1659,6 +1670,7 @@ async function handleDashboard() {
                     }
                     list.innerHTML = '<table class="heat-table">' + header + '<tbody>' + rows.join('') + '</tbody></table>';
                 } else {
+                    try { list.classList.remove('heat-table-mode'); } catch (e) {}
                     list.innerHTML = ordered.map(p => {
                         const sideClass = p.side === 'DEMAND' ? 'side-demand' : (p.side === 'SUPPLY' ? 'side-supply' : '');
                         const sideText = p.side === 'DEMAND' ? 'DEMANDA' : (p.side === 'SUPPLY' ? 'OFERTA' : 'NEUTRAL');
