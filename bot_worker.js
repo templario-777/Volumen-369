@@ -319,28 +319,47 @@ async function handleDashboard() {
         .BUY { color: var(--green) !important; }
         .SELL { color: var(--red) !important; }
         
-        .search-box { background: #2b3139; border: 4px solid var(--yellow); color: #fff; padding: 18px 30px; border-radius: 60px; width: 450px; font-size: 1.4rem; outline: none; box-shadow: 0 0 20px rgba(240, 185, 11, 0.2); }
+        .search-box { background: #2b3139; border: 4px solid var(--yellow); color: #fff; padding: 18px 30px; border-radius: 60px; width: min(450px, 100%); font-size: 1.1rem; outline: none; box-shadow: 0 0 20px rgba(240, 185, 11, 0.2); }
+        .search-box::placeholder { color: rgba(255,255,255,0.65); }
         
         .liq-zone { padding: 25px; border-radius: 20px; margin-top: 20px; border: 4px solid; position: relative; overflow: hidden; }
         .liq-shorts { background: rgba(14, 203, 129, 0.15); border-color: var(--green); }
         .liq-longs { background: rgba(246, 70, 93, 0.15); border-color: var(--red); }
         
-        .chart-container { height: 600px; border-radius: 20px; overflow: hidden; border: 3px solid #474d57; }
+        .chart-container { height: min(600px, 60vh); border-radius: 20px; overflow: hidden; border: 3px solid #474d57; }
         #idea-pill { background: var(--yellow); color: #000; padding: 12px 25px; border-radius: 12px; font-size: 1.3rem; font-weight: 900; box-shadow: 0 5px 15px rgba(240, 185, 11, 0.4); }
         
         .gravity-bar { height: 12px; background: #2b3139; border-radius: 10px; margin-top: 10px; overflow: hidden; border: 1px solid #474d57; }
         .gravity-fill { height: 100%; background: var(--yellow); transition: 0.5s; box-shadow: 0 0 10px var(--yellow); }
         .mtf-table { width: 100%; margin-top: 10px; font-size: 0.95rem; }
-        .mtf-table td { padding: 8px 6px; border-bottom: 1px solid rgba(71, 77, 87, 0.6); }
+        .mtf-table td { padding: 10px 8px; border-bottom: 1px solid rgba(71, 77, 87, 0.6); color: #ffffff; }
         .mtf-tag { font-weight: 900; color: #fff; }
-        .mono { font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
+        .mono { font-variant-numeric: tabular-nums; letter-spacing: 0.5px; color: #ffffff; }
         #funding, #oi, #oiChange, #obImb { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
         #sentimentBox { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
+        .mtf-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+        @media (max-width: 992px) {
+          .card { padding: 18px; border-radius: 16px; }
+          .metric-value { font-size: 2.2rem; }
+          .plan-val { font-size: 1.7rem; }
+          #idea-pill { font-size: 1.05rem; padding: 10px 16px; }
+          .chart-container { height: 52vh; }
+        }
+
+        @media (max-width: 576px) {
+          .metric-label { font-size: 0.85rem; }
+          .metric-value { font-size: 1.9rem; }
+          .plan-val { font-size: 1.45rem; }
+          .chart-container { height: 46vh; }
+          .search-box { font-size: 1rem; padding: 14px 18px; border-width: 3px; }
+          .mtf-table { font-size: 0.85rem; }
+        }
     </style>
 </head>
 <body>
     <div class="container-fluid p-4">
-        <div class="d-flex justify-content-between align-items-center mb-4">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-3">
             <h1 class="m-0 fw-bold">🚀 Volumen-369 <span class="badge bg-warning text-dark">V5 MAGNET GRAVITY</span></h1>
             <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO (BTC, ETH...)" onkeypress="if(event.key==='Enter') updateSymbol()">
         </div>
@@ -393,14 +412,16 @@ async function handleDashboard() {
                     <div class="col-12">
                         <div class="card">
                             <h5 class="metric-label text-center">NIVELES DE ENTRADA ALGORÍTMICA (IMANES)</h5>
-                            <table class="mtf-table">
-                                <tbody>
-                                    <tr><td class="mtf-tag">15M</td><td>POC</td><td id="poc15m" class="mono"></td><td>⬆</td><td id="up15m" class="mono"></td><td>⬇</td><td id="dn15m" class="mono"></td></tr>
-                                    <tr><td class="mtf-tag">1H</td><td>POC</td><td id="poc1h" class="mono"></td><td>⬆</td><td id="up1h" class="mono"></td><td>⬇</td><td id="dn1h" class="mono"></td></tr>
-                                    <tr><td class="mtf-tag">4H</td><td>POC</td><td id="poc4h" class="mono"></td><td>⬆</td><td id="up4h" class="mono"></td><td>⬇</td><td id="dn4h" class="mono"></td></tr>
-                                    <tr><td class="mtf-tag">1D</td><td>POC</td><td id="poc1d" class="mono"></td><td>⬆</td><td id="up1d" class="mono"></td><td>⬇</td><td id="dn1d" class="mono"></td></tr>
-                                </tbody>
-                            </table>
+                            <div class="mtf-wrap">
+                              <table class="mtf-table">
+                                  <tbody>
+                                      <tr><td class="mtf-tag">15M</td><td>POC</td><td id="poc15m" class="mono"></td><td>⬆</td><td id="up15m" class="mono"></td><td>⬇</td><td id="dn15m" class="mono"></td></tr>
+                                      <tr><td class="mtf-tag">1H</td><td>POC</td><td id="poc1h" class="mono"></td><td>⬆</td><td id="up1h" class="mono"></td><td>⬇</td><td id="dn1h" class="mono"></td></tr>
+                                      <tr><td class="mtf-tag">4H</td><td>POC</td><td id="poc4h" class="mono"></td><td>⬆</td><td id="up4h" class="mono"></td><td>⬇</td><td id="dn4h" class="mono"></td></tr>
+                                      <tr><td class="mtf-tag">1D</td><td>POC</td><td id="poc1d" class="mono"></td><td>⬆</td><td id="up1d" class="mono"></td><td>⬇</td><td id="dn1d" class="mono"></td></tr>
+                                  </tbody>
+                              </table>
+                            </div>
                             <div class="liq-zone liq-shorts">
                                 <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (PUNTO DE REBOTE)</div>
                                 <div id="liqShorts" class="BUY h1 m-0 mono">---</div>
