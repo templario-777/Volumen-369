@@ -898,9 +898,12 @@ async function handleDashboard() {
         .heat-band { position: absolute; left: 10px; right: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.10); }
         .heat-line { position: absolute; left: 10px; right: 10px; height: 3px; border-radius: 8px; }
         .heat-last { position: absolute; left: 6px; right: 6px; height: 2px; background: rgba(255,255,255,0.9); box-shadow: 0 0 10px rgba(255,255,255,0.35); }
-        .heat-label { position: absolute; right: 12px; transform: translateY(-50%); font-size: 0.78rem; font-weight: 900; color: rgba(255,255,255,0.92); text-shadow: 0 2px 10px rgba(0,0,0,0.7); pointer-events: none; }
+        .heat-label { position: absolute; right: 12px; transform: translateY(-50%); font-size: clamp(0.68rem, 1.2vw, 0.82rem); font-weight: 900; color: rgba(255,255,255,0.95); text-shadow: 0 2px 10px rgba(0,0,0,0.8); pointer-events: none; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.10); max-width: calc(100% - 24px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .heat-legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 0.8rem; color: #d5d9e0; font-weight: 800; }
         .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12); }
+        .heat-list { margin-top: 10px; display: grid; grid-template-columns: 1fr; gap: 6px; }
+        .heat-item { display:flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.25); color: #fff; font-weight: 900; font-size: 0.95rem; }
+        .heat-item small { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; }
 
         @media (max-width: 992px) {
           .card { padding: 18px; border-radius: 16px; }
@@ -1027,6 +1030,7 @@ async function handleDashboard() {
                                 <span class="pill">Centro = POC</span>
                                 <span class="pill">Abajo = Demand</span>
                             </div>
+                            <div id="heatmapList" class="heat-list"></div>
                         </div>
                     </div>
                     <div class="col-12">
@@ -1445,13 +1449,16 @@ async function handleDashboard() {
 
         function renderHeatmap(hm) {
             const root = document.getElementById('heatmap');
+            const list = document.getElementById('heatmapList');
             if (!root) return;
             if (!hm || hm.min == null || hm.max == null || !isFinite(hm.min) || !isFinite(hm.max) || hm.min === hm.max) {
                 root.innerHTML = '';
+                if (list) list.innerHTML = '';
                 return;
             }
             const min = hm.min, max = hm.max;
             const h = root.clientHeight || 260;
+            const w = root.clientWidth || 420;
             const toY = (p) => {
                 const t = (p - min) / (max - min);
                 const y = (1 - t) * h;
@@ -1473,21 +1480,45 @@ async function handleDashboard() {
             }
 
             const points = Array.isArray(hm.points) ? hm.points : [];
+            const labelCandidates = [];
             for (const p of points) {
                 const y = toY(p.price);
                 const base = p.side === 'DEMAND' ? '14,203,129' : (p.side === 'SUPPLY' ? '246,70,93' : '240,185,11');
                 const alpha = 0.25 + 0.55 * (p.strength || 0.4);
                 bands.push('<div class="heat-line" style="top:' + (y - 1) + 'px;background:rgba(' + base + ',' + alpha + ');"></div>');
-                if (p.kind === 'POC' || p.kind === 'BPOC' || p.kind === 'SPOC') {
-                    bands.push('<div class="heat-label" style="top:' + y + 'px;">' + p.tf.toUpperCase() + ' ' + p.kind + ' • ' + fmt(p.price) + '</div>');
-                }
+                if (p.kind === 'POC' || p.kind === 'BPOC' || p.kind === 'SPOC') labelCandidates.push({ y, tf: p.tf, kind: p.kind, price: p.price });
             }
 
             const yLast = toY(hm.last);
             bands.push('<div class="heat-last" style="top:' + yLast + 'px;"></div>');
             bands.push('<div class="heat-label" style="top:' + yLast + 'px;right:12px;">LAST • ' + fmt(hm.last) + '</div>');
 
+            const showInlineLabels = w >= 420;
+            if (showInlineLabels) {
+                const important = labelCandidates.filter(x => x.tf === '4h' || x.tf === '1d');
+                important.sort((a, b) => a.y - b.y);
+                let lastPlaced = -9999;
+                const minGap = 18;
+                for (const it of important) {
+                    if (Math.abs(it.y - lastPlaced) < minGap) continue;
+                    bands.push('<div class="heat-label" style="top:' + it.y + 'px;">' + it.tf.toUpperCase() + ' ' + it.kind + ' • ' + fmt(it.price) + '</div>');
+                    lastPlaced = it.y;
+                }
+            }
+
             root.innerHTML = bands.join('');
+
+            if (list) {
+                const byStrength = points
+                    .filter(p => p.kind === 'BPOC' || p.kind === 'POC' || p.kind === 'SPOC')
+                    .sort((a, b) => (b.strength || 0) - (a.strength || 0))
+                    .slice(0, 6);
+
+                list.innerHTML = byStrength.map(p => {
+                    const tag = p.tf.toUpperCase() + ' ' + p.kind;
+                    return '<div class="heat-item"><div><div>' + tag + '</div><small>' + p.side + '</small></div><div class="mono">' + fmt(p.price) + '</div></div>';
+                }).join('');
+            }
         }
     </script>
 </body>
