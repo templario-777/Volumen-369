@@ -48,11 +48,11 @@ async function getProAnalysis(symbol) {
   symbol = symbol.toUpperCase();
   
   const [c15m, c1h, c4h, c1d, depth] = await Promise.all([
-    fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=15m&limit=200`),
-    fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1h&limit=200`),
-    fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=4h&limit=200`),
-    fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=1d&limit=200`),
-    fetchBinance(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=100`)
+    fetchKlines(symbol, "15m", 200),
+    fetchKlines(symbol, "1h", 200),
+    fetchKlines(symbol, "4h", 200),
+    fetchKlines(symbol, "1d", 200),
+    fetchDepth(symbol, 100)
   ]);
 
   let futures = { funding: 0, oi: 0, oiChange: 0 };
@@ -148,6 +148,22 @@ async function getProAnalysis(symbol) {
       targetTf: oppPick.tf
     }
   };
+}
+
+async function fetchKlines(symbol, interval, limit) {
+  try {
+    return await fetchBinance(`https://api.binance.com/api/v3/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+  } catch (e) {
+    return await fetchBinance(`https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=${interval}&limit=${limit}`);
+  }
+}
+
+async function fetchDepth(symbol, limit) {
+  try {
+    return await fetchBinance(`https://api.binance.com/api/v3/depth?symbol=${symbol}&limit=${limit}`);
+  } catch (e) {
+    return await fetchBinance(`https://fapi.binance.com/fapi/v1/depth?symbol=${symbol}&limit=${limit}`);
+  }
 }
 
 function computeVolumeProfile(candles, currentPrice, bins) {
@@ -318,6 +334,8 @@ async function handleDashboard() {
         .mtf-table td { padding: 8px 6px; border-bottom: 1px solid rgba(71, 77, 87, 0.6); }
         .mtf-tag { font-weight: 900; color: #fff; }
         .mono { font-variant-numeric: tabular-nums; letter-spacing: 0.5px; }
+        #funding, #oi, #oiChange, #obImb { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
+        #sentimentBox { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
     </style>
 </head>
 <body>
@@ -401,11 +419,26 @@ async function handleDashboard() {
     <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
     <script>
         let currentSymbol = "BTCUSDT";
+        let tvWidget = null;
         function initChart(s) {
-            new TradingView.widget({
+            tvWidget = new TradingView.widget({
                 "autosize": true, "symbol": "BINANCE:" + s, "interval": "15", "theme": "dark", "style": "1",
                 "container_id": "tv_chart", "studies": ["VWAP@tv-basicstudies"]
             });
+
+            try {
+                tvWidget.onChartReady(function() {
+                    try {
+                        tvWidget.chart().onSymbolChanged().subscribe(null, function(sym) {
+                            const raw = (sym && sym.name) ? sym.name : "";
+                            const parsed = parseTvSymbol(raw);
+                            if (parsed) {
+                                setSymbolFromChart(parsed);
+                            }
+                        });
+                    } catch (e) {}
+                });
+            } catch (e) {}
         }
 
         async function updateSymbol() {
@@ -415,6 +448,31 @@ async function handleDashboard() {
             const res = await (await fetch(\`/api/check-symbol?symbol=\${input}\`)).json();
             if(res.exists) { currentSymbol = input; initChart(input); loadData(); document.getElementById('symbolInput').value = ""; }
             else { alert("Moneda no encontrada."); }
+        }
+
+        function parseTvSymbol(raw) {
+            if (!raw) return null;
+            let s = raw;
+            const idx = s.indexOf(":");
+            if (idx >= 0) s = s.slice(idx + 1);
+            const dot = s.indexOf(".");
+            if (dot >= 0) s = s.slice(0, dot);
+            s = s.replace(/USDTPERP$/i, "USDT");
+            s = s.replace(/PERP$/i, "");
+            s = s.toUpperCase().trim();
+            if (!s) return null;
+            if (!s.endsWith("USDT") && !s.endsWith("BUSD") && !s.endsWith("USDC")) s = s + "USDT";
+            return s;
+        }
+
+        async function setSymbolFromChart(symbol) {
+            if (symbol === currentSymbol) return;
+            const res = await (await fetch(\`/api/check-symbol?symbol=\${symbol}\`)).json();
+            if (res.exists) {
+                currentSymbol = symbol;
+                document.getElementById('symbolInput').value = "";
+                loadData();
+            }
         }
 
         async function loadData() {
