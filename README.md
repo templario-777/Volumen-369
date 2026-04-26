@@ -1,121 +1,79 @@
-# 🚀 Volumen-369 - Bot Trading Real 24/7
+# 🚀 Volumen-369 — Dashboard Algorítmico “Magnet Gravity” (Cloudflare Worker)
 
-Bot de trading real para Binance con monitoreo 24/7, detección de patrones de volumen, ejecución de órdenes REALES y alertas a Telegram vía Cloudflare Worker.
+Dashboard de análisis y ejecución manual asistida para Binance (Spot/Futuros) con:
+- Mapa de “imanes” por Perfil de Volumen multi‑timeframe (15m/1h/4h/1d).
+- Filtros V6 de precisión (Delta Divergence, Slippage Predictor, Volume Cluster 1D).
+- Filtros V7 de confirmación (HFT speed + V‑Shape en tiempo real, Spot‑Futures basis, Soporte/Resistencia).
 
-## ✨ Características
+Este proyecto está pensado para ayudarte a operar de forma sistemática: el panel te dice “OPERAR / NO OPERAR” según reglas, pero la orden la colocas tú en Binance.
 
-- 🔍 **Escáner 24/7**: Monitorea las 10 criptomonedas más líquidas automáticamente.
-- 📊 **Detección de Patrones**: Identifica rupturas alcistas/bajistas con RVOL > 2.0.
-- 💼 **Órdenes REALES**: Ejecuta compras/ventas en Binance (no simuladas).
-- 🎯 **Gestión de Riesgo**: Take Profit (+4%) y Stop Loss (-2%) automáticos.
-- 📱 **Alertas Telegram**: Envía notificaciones de entrada y salida vía Cloudflare Worker.
-- 📈 **Panel de Métricas**: Historial de operaciones cerradas con ganancia/pérdida.
+## ✅ URL
 
-## 🛠️ Solución Única: Cloudflare Worker (Proxy)
+- Worker: `https://volumen-369-bot.<tu-id>.workers.dev`
 
-Debido a que **Binance bloquea el acceso desde ciertas ubicaciones** (Error 451), la **única solución** es usar un **Cloudflare Worker** como proxy.
+## ✨ Qué hace (resumen)
 
-### Paso a paso para crear tu Worker:
+- **Imanes (MTF)**: calcula BPOC/POC/SPOC en 15m/1h/4h/1d y selecciona el imán dominante para la entrada.
+- **Order Book Gravity**: mide desequilibrio de bids/asks para saber hacia dónde “tira” el dinero en ese momento.
+- **Delta Divergence**: confirma absorción (precio baja pero delta sube = compradores ganan).
+- **Slippage Predictor**: estima spread/slippage en el libro; si es caro entrar, aborta.
+- **Volume Cluster 1D**: valida que tu entrada coincide con una zona macro donde hubo dinero real.
+- **HFT/V‑Shape (websocket)**: cuando el precio está cerca del imán, se activa un modo HFT en el navegador:
+  TPS, ms/trade, ratio buy/sell y “V‑Shape READY”.
+- **Spot‑Futures Arb (basis)**: compara spot vs futuros para detectar divergencias de liquidez.
+- **Soporte/Resistencia**: zonas derivadas de Supply/Demand (rebotes típicos).
 
-1. **Entra a [Cloudflare Dashboard](https://dash.cloudflare.com/)**
-2. Ve a **Workers & Pages → Create Application → Create Worker**
-3. Nombra tu Worker: `binance-proxy`
-4. **Pega este código** en el editor:
+## 🧠 Estrategia (cómo usarlo)
 
-```javascript
-export default {
-  async fetch(request) {
-    const url = new URL(request.url);
-    const target = url.searchParams.get("target");
-    if (!target) return new Response("Falta ?target=", {status: 400});
+### 1) Elige el símbolo (spot o perp)
+- Puedes buscar en la barra superior o cambiar el símbolo desde el gráfico.
+- El panel se sincroniza automáticamente con el símbolo del gráfico.
 
-    const init = {
-      method: request.method,
-      headers: request.headers,
-      redirect: "follow"
-    };
-    if (request.method !== "GET" && request.method !== "HEAD") {
-      init.body = request.body;
-    }
-    return fetch(target + url.pathname + url.search, init);
-  }
-}
-```
+### 2) Identifica el “IMÁN” de entrada (nivel clave)
+- La **ENTRADA (IMÁN)** es el nivel algorítmico.
+- No se entra “en cualquier sitio”: se espera a que el precio se acerque al imán.
 
-5. **Deploy** → Tendrás una URL tipo:  
-   `https://binance-proxy.tu-cuenta.workers.dev`
+Regla práctica:
+- Si el precio está a más de ~0.25%–0.35% del imán, el sistema no activa HFT.
+- Cuando se acerca, el HFT se activa y busca confirmación institucional.
 
-6. **En tu app de Streamlit** → **Settings → Secrets** añade:
-   ```
-   CLOUDFLARE_WORKER_URL=https://binance-proxy.tu-cuenta.workers.dev
-   ```
+### 3) Confirma con V6 (precisión)
+Para considerar entrada, el panel debe estar sano:
+- **Delta Divergence**: ideal que marque absorción (bullish/bearish).
+- **Slippage Predictor**: debe estar en **OK** (si dice ABORTAR ENTRADA, se cancela la idea).
+- **Volume Cluster 1D**: ideal **MEDIO/ALTO** (zona macro real).
 
-## 📦 Requisitos
+### 4) Confirma con V7 (timing exacto)
+El punto de giro se toma solo si:
+- **TPS alto** (cinta rápida).
+- **Ratio Buy/Sell alto** (ej. ≥ 3.0).
+- **V‑Shape READY** (rebote detectado en <60s).
 
-```bash
-pip install ccxt pandas streamlit requests
-```
+### 5) Ejecución y gestión
+- Entrada: coloca tu orden en el **imán** (preferible limit).
+- SL: usa el SL que da el panel.
+- TP1: rebote al POC/retorno a equilibrio.
+- TP2: “imán opuesto” (barrida total).
+- **Auto‑Breakeven (manual)**: si el movimiento va a favor, mueve SL a entrada según la regla mostrada.
 
-## 🚀 Deploy en Streamlit Community Cloud
+## 🛠️ Despliegue (Cloudflare Worker)
 
-1. Sube este proyecto a GitHub (ya está en `templario-777/Volumen-369`)
-2. En [share.streamlit.io](https://share.streamlit.io/):
-   - **Repository**: `templario-777/Volumen-369`
-   - **Branch**: `main`
-   - **Main file path**: `web_binance_bot.py`
-3. **Settings → Secrets** - Añade TODAS estas claves:
-
-```
-BINANCE_API_KEY=tu_api_key_real
-BINANCE_API_SECRET=tu_api_secret_real
-CLOUDFLARE_WORKER_URL=https://binance-proxy.tu-cuenta.workers.dev
-TELEGRAM_BOT_TOKEN=8433576034:AAECY1icIrGo_wd_xfQZsMbDo2ofd6N2-9o
-TELEGRAM_CHAT_ID=6674674335
-```
-
-4. **Deploy** y espera a que termine (aprox. 30 seg).
-
-## 📈 Uso
-
-1. **Abre tu app** en Streamlit Cloud.
-2. **Rellena tus credenciales** Binance en la barra lateral.
-3. Pulsa **"🔍 Seleccionar Top 10"** (se identifican las 10 criptos más líquidas).
-4. El bot **monitorea 24/7** y cuando detecta un patrón:
-   - Abre una orden REAL en Binance.
-   - Envía alerta a Telegram con entrada, SL y TP.
-5. **Gestión automática**: Cuando el precio toca TP o SL:
-   - Cierra la orden automáticamente.
-   - Envía alerta de cierre a Telegram con ganancia/pérdida.
+1. Cloudflare Dashboard → Workers & Pages → Create Worker
+2. Nombre: `volumen-369-bot`
+3. Copia el contenido de [bot_worker.js](file:///c:/Users/Alumno.LAPTOP-72MR2U1M/Music/Crypto/bot_worker.js) al editor del Worker
+4. Deploy
 
 ## ⚠️ Seguridad
 
-- **NUNCA subas tus API keys** al repositorio.
-- **Usa Streamlit Secrets** para almacenar credenciales.
-- **Prueba primero** con montos pequeños (ej. $10 USD por operación).
+- No pegues API keys en el repositorio.
+- Este dashboard usa endpoints públicos de Binance y websockets desde tu navegador.
+- Si decides operar, hazlo con tamaño pequeño hasta validar reglas en tus activos.
 
-## 📊 Métricas Disponibles
+## 📌 Notas técnicas
 
-| Métrica | Descripción |
-|----------|--------------|
-| Operaciones Activas | Posiciones abiertas con SL/TP en tiempo real |
-| Historial | Últimas 10 operaciones cerradas con % ganancia |
-| Señales | Detección de BUY/SELL con fuerza (0-100%) |
-| RVOL | Volumen relativo vs media 20 períodos |
-
-## 🚀 Avances Recientes
-
-- ✅ Solución única Cloudflare Worker para Error 451
-- ✅ Eliminadas otras opciones de proxy (Smartproxy, IPRoyal, etc.)
-- ✅ Órdenes 100% REALES en Binance
-- ✅ Gestión automática de TP/SL
-- ✅ Alertas Telegram vía Cloudflare Worker
-- ✅ Panel de historial de operaciones
+- El modo HFT corre en tu navegador (WebSocket), no dentro del Worker.
+- El Worker hace “fallback” Spot/Futuros para que el símbolo del gráfico y el cálculo coincidan mejor.
 
 ---
 
-**Repositorio**: https://github.com/templario-777/Volumen-369  
-**Soporte**: Solo Cloudflare Worker como proxy
-
-> ⚠️ *Este bot ejecuta órdenes REALES. Opera con precaución y gestiona tu riesgo.*
-
-**Co-Authored-By**: Claude Opus 4.7 <noreply@anthropic.com>
+Repositorio: https://github.com/templario-777/Volumen-369
