@@ -925,6 +925,18 @@ async function handleDashboard() {
         :root[data-device="desktop"] .heat-price { font-size: 1.12rem; }
         :root[data-device="desktop"] .card { padding: 26px; }
         :root[data-device="desktop"] .search-box { font-size: 1.15rem; }
+        :root[data-device="desktop"] .container-fluid { max-width: 1500px; margin-left: auto; margin-right: auto; }
+        :root[data-device="desktop"] .col-lg-8 { flex: 0 0 auto; width: 66.66666667%; }
+        :root[data-device="desktop"] .col-lg-4 { flex: 0 0 auto; width: 33.33333333%; }
+        :root[data-device="desktop"] .row { flex-wrap: wrap; }
+
+        .heat-table { width: 100%; border-collapse: separate; border-spacing: 0 10px; }
+        .heat-table th { text-align: left; color: #d5d9e0; font-size: 0.78rem; font-weight: 900; letter-spacing: 1px; padding: 0 10px; }
+        .heat-row { background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.22)); border: 1px solid rgba(255,255,255,0.10); border-radius: 14px; }
+        .heat-table td { padding: 10px 10px; color: #fff; font-weight: 900; vertical-align: middle; }
+        .heat-table .cell-left { display:flex; gap: 8px; align-items:center; }
+        .heat-table .cell-right { text-align: right; }
+        .heat-table .cell-right .heat-sub { display:block; }
 
         @media (max-width: 992px) {
           .card { padding: 18px; border-radius: 16px; }
@@ -1132,13 +1144,14 @@ async function handleDashboard() {
     <script>
         (function() {
             function detectDevice() {
-                const w = window.innerWidth || document.documentElement.clientWidth || 0;
+                const w = (window.visualViewport && window.visualViewport.width) ? window.visualViewport.width : (window.innerWidth || document.documentElement.clientWidth || 0);
                 const hasHover = window.matchMedia ? window.matchMedia('(hover: hover)').matches : false;
                 const fine = window.matchMedia ? window.matchMedia('(pointer: fine)').matches : false;
                 const coarse = window.matchMedia ? window.matchMedia('(pointer: coarse)').matches : false;
+                const screenW = (window.screen && window.screen.width) ? window.screen.width : 0;
 
                 let device = 'mobile';
-                if ((hasHover && fine) || (!coarse && w >= 992)) device = 'desktop';
+                if ((hasHover && fine) || (screenW >= 1024 && !coarse) || (!coarse && w >= 992)) device = 'desktop';
                 document.documentElement.setAttribute('data-device', device);
             }
 
@@ -1627,21 +1640,41 @@ async function handleDashboard() {
                     })
                     .slice(0, maxItems);
 
-                list.innerHTML = ordered.map(p => {
-                    const sideClass = p.side === 'DEMAND' ? 'side-demand' : (p.side === 'SUPPLY' ? 'side-supply' : '');
-                    const sideText = p.side === 'DEMAND' ? 'DEMANDA' : (p.side === 'SUPPLY' ? 'OFERTA' : 'NEUTRAL');
-                    return '<div class="heat-item">'
-                      + '<div class="heat-left">'
-                      + '<span class="tag tf">' + p.tf.toUpperCase() + '</span>'
-                      + '<span class="tag kind">' + p.kind + '</span>'
-                      + '<span class="tag ' + sideClass + '">' + sideText + '</span>'
-                      + '</div>'
-                      + '<div style="text-align:right;min-width:120px;">'
-                      + '<div class="heat-price mono">' + fmt(p.price) + '</div>'
-                      + '<div class="heat-sub">Fuerza: ' + Math.round((p.strength || 0) * 100) + '%</div>'
-                      + '</div>'
-                      + '</div>';
-                }).join('');
+                const showTable = w >= 520;
+                if (showTable) {
+                    const rows = [];
+                    const header = '<thead><tr>'
+                      + '<th>TF</th><th>NIVEL</th><th>LADO</th><th class="cell-right">PRECIO</th>'
+                      + '</tr></thead>';
+
+                    for (const p of ordered) {
+                        const sideText = p.side === 'DEMAND' ? 'DEMANDA' : (p.side === 'SUPPLY' ? 'OFERTA' : 'NEUTRAL');
+                        const sideClass = p.side === 'DEMAND' ? 'side-demand' : (p.side === 'SUPPLY' ? 'side-supply' : '');
+                        rows.push('<tr class="heat-row">'
+                          + '<td><span class="tag tf">' + p.tf.toUpperCase() + '</span></td>'
+                          + '<td><span class="tag kind">' + p.kind + '</span></td>'
+                          + '<td><span class="tag ' + sideClass + '">' + sideText + '</span></td>'
+                          + '<td class="cell-right"><span class="mono heat-price">' + fmt(p.price) + '</span><span class="heat-sub">Fuerza: ' + Math.round((p.strength || 0) * 100) + '%</span></td>'
+                          + '</tr>');
+                    }
+                    list.innerHTML = '<table class="heat-table">' + header + '<tbody>' + rows.join('') + '</tbody></table>';
+                } else {
+                    list.innerHTML = ordered.map(p => {
+                        const sideClass = p.side === 'DEMAND' ? 'side-demand' : (p.side === 'SUPPLY' ? 'side-supply' : '');
+                        const sideText = p.side === 'DEMAND' ? 'DEMANDA' : (p.side === 'SUPPLY' ? 'OFERTA' : 'NEUTRAL');
+                        return '<div class="heat-item">'
+                          + '<div class="heat-left">'
+                          + '<span class="tag tf">' + p.tf.toUpperCase() + '</span>'
+                          + '<span class="tag kind">' + p.kind + '</span>'
+                          + '<span class="tag ' + sideClass + '">' + sideText + '</span>'
+                          + '</div>'
+                          + '<div style="text-align:right;min-width:120px;">'
+                          + '<div class="heat-price mono">' + fmt(p.price) + '</div>'
+                          + '<div class="heat-sub">Fuerza: ' + Math.round((p.strength || 0) * 100) + '%</div>'
+                          + '</div>'
+                          + '</div>';
+                    }).join('');
+                }
             }
         }
     </script>
