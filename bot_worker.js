@@ -157,6 +157,7 @@ async function getProAnalysis(symbol) {
   const delta = computeDeltaDivergence(c15m, 20);
   const slip = computeSlippagePredictor(depth, lastPrice, entrySide === "ABAJO" ? "BUY" : "SELL", symbol.includes("USDT") ? 100 : 100);
   const cluster1d = computeVolumeCluster1D(c1d, entry, 120);
+  const heatmap = buildLiquidationHeatmap({ mtf, chartPrime: cp, supplyDemand: sd, lastPrice });
 
   return {
     symbol, price: lastPrice,
@@ -177,6 +178,7 @@ async function getProAnalysis(symbol) {
     delta,
     slippage: slip,
     cluster1d,
+    heatmap,
     plan: { 
       entry: entry.toFixed(fmtDp),
       sl: sl.toFixed(fmtDp),
@@ -761,6 +763,92 @@ function calculateATR(high, low, close, period) {
   return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
 
+function buildLiquidationHeatmap({ mtf, chartPrime, supplyDemand, lastPrice }) {
+  const tfWeight = { "15m": 0.35, "1h": 0.55, "4h": 0.8, "1d": 1.0 };
+  const points = [];
+  const zones = [];
+
+  const addPoint = (tf, kind, side, price, strength) => {
+    if (price == null || !Number.isFinite(price)) return;
+    points.push({
+      tf,
+      kind,
+      side,
+      price,
+      strength: clamp01(strength),
+    });
+  };
+
+  const addZone = (tf, kind, side, top, bottom, strength) => {
+    if (top == null || bottom == null) return;
+    const t = Number(top);
+    const b = Number(bottom);
+    if (!Number.isFinite(t) || !Number.isFinite(b)) return;
+    const zTop = Math.max(t, b);
+    const zBottom = Math.min(t, b);
+    zones.push({
+      tf,
+      kind,
+      side,
+      top: zTop,
+      bottom: zBottom,
+      mid: (zTop + zBottom) / 2,
+      strength: clamp01(strength),
+    });
+  };
+
+  for (const tf of ["15m", "1h", "4h", "1d"]) {
+    const w = tfWeight[tf] || 0.5;
+    const cp = chartPrime && chartPrime[tf] ? chartPrime[tf] : null;
+    if (cp) {
+      addPoint(tf, "BPOC", "DEMAND", cp.buyPoc, 0.65 * w);
+      addPoint(tf, "POC", "NEUTRAL", cp.poc, 0.5 * w);
+      addPoint(tf, "SPOC", "SUPPLY", cp.sellPoc, 0.65 * w);
+    }
+
+    const sd = supplyDemand && supplyDemand[tf] ? supplyDemand[tf] : null;
+    if (sd) {
+      const demand = Array.isArray(sd.demand) ? sd.demand.slice(0, 2) : [];
+      const supply = Array.isArray(sd.supply) ? sd.supply.slice(0, 2) : [];
+      for (const d of demand) addZone(tf, "DEMAND_ZONE", "DEMAND", d.top, d.bottom, 0.55 * w);
+      for (const s of supply) addZone(tf, "SUPPLY_ZONE", "SUPPLY", s.top, s.bottom, 0.55 * w);
+    }
+
+    const p = mtf && mtf[tf] ? mtf[tf] : null;
+    if (p) {
+      addPoint(tf, "MAGNET_UP", "SUPPLY", p.magnetUp, 0.35 * w);
+      addPoint(tf, "MAGNET_DOWN", "DEMAND", p.magnetDown, 0.35 * w);
+    }
+  }
+
+  const allPrices = [lastPrice]
+    .concat(points.map(p => p.price))
+    .concat(zones.map(z => z.top))
+    .concat(zones.map(z => z.bottom))
+    .filter(v => v != null && Number.isFinite(v));
+
+  if (!allPrices.length) {
+    return { min: null, max: null, last: lastPrice, points: [], zones: [] };
+  }
+
+  let min = allPrices[0];
+  let max = allPrices[0];
+  for (const v of allPrices) {
+    if (v < min) min = v;
+    if (v > max) max = v;
+  }
+  const pad = (max - min) * 0.06 || (lastPrice * 0.01);
+  min -= pad;
+  max += pad;
+
+  return { min, max, last: lastPrice, points, zones };
+}
+
+function clamp01(x) {
+  if (!Number.isFinite(x)) return 0;
+  return Math.max(0, Math.min(1, x));
+}
+
 async function fetchBinance(url) {
   const r = await fetch(url, { headers: { "User-Agent": "Mozilla/5.0" } });
   if (!r.ok) throw new Error(`API Error`);
@@ -806,6 +894,13 @@ async function handleDashboard() {
         #funding, #oi, #oiChange, #obImb { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
         #sentimentBox { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
         .mtf-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+        .heatmap { height: 260px; border: 2px solid rgba(71,77,87,0.8); border-radius: 14px; background: linear-gradient(180deg, rgba(246,70,93,0.08) 0%, rgba(240,185,11,0.04) 50%, rgba(14,203,129,0.08) 100%); position: relative; overflow: hidden; }
+        .heat-band { position: absolute; left: 10px; right: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.10); }
+        .heat-line { position: absolute; left: 10px; right: 10px; height: 3px; border-radius: 8px; }
+        .heat-last { position: absolute; left: 6px; right: 6px; height: 2px; background: rgba(255,255,255,0.9); box-shadow: 0 0 10px rgba(255,255,255,0.35); }
+        .heat-label { position: absolute; right: 12px; transform: translateY(-50%); font-size: 0.78rem; font-weight: 900; color: rgba(255,255,255,0.92); text-shadow: 0 2px 10px rgba(0,0,0,0.7); pointer-events: none; }
+        .heat-legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 0.8rem; color: #d5d9e0; font-weight: 800; }
+        .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12); }
 
         @media (max-width: 992px) {
           .card { padding: 18px; border-radius: 16px; }
@@ -920,6 +1015,17 @@ async function handleDashboard() {
                                     <div id="clusterLevel" class="h5" style="color:#fff;"></div>
                                     <div id="clusterDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="card">
+                            <h5 class="metric-label text-center">HEATMAP DE LIQUIDACIÓN (V8)</h5>
+                            <div id="heatmap" class="heatmap"></div>
+                            <div class="heat-legend">
+                                <span class="pill">Arriba = Supply</span>
+                                <span class="pill">Centro = POC</span>
+                                <span class="pill">Abajo = Demand</span>
                             </div>
                         </div>
                     </div>
@@ -1307,6 +1413,8 @@ async function handleDashboard() {
             document.getElementById('clusterLevel').innerText = (cl.level || '---') + ' (Strength: ' + (cl.strength != null ? (cl.strength * 100).toFixed(0) : '---') + '%)';
             document.getElementById('clusterDetails').innerText = 'Centro: ' + (cl.clusterPrice != null ? Number(cl.clusterPrice).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '---') + ' | Dist: ' + (cl.distancePct != null ? cl.distancePct.toFixed(2) : '---') + '%';
 
+            renderHeatmap(d.heatmap);
+
             const arb = d.arb || {};
             if (arb.ok) {
                 document.getElementById('arbBasis').innerText = (arb.basisPct != null ? arb.basisPct.toFixed(3) : '---') + '%';
@@ -1334,6 +1442,53 @@ async function handleDashboard() {
         }
 
         initChart(currentSymbol); loadData(); setInterval(loadData, 10000);
+
+        function renderHeatmap(hm) {
+            const root = document.getElementById('heatmap');
+            if (!root) return;
+            if (!hm || hm.min == null || hm.max == null || !isFinite(hm.min) || !isFinite(hm.max) || hm.min === hm.max) {
+                root.innerHTML = '';
+                return;
+            }
+            const min = hm.min, max = hm.max;
+            const h = root.clientHeight || 260;
+            const toY = (p) => {
+                const t = (p - min) / (max - min);
+                const y = (1 - t) * h;
+                return Math.max(0, Math.min(h, y));
+            };
+            const fmt = (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
+            const bands = [];
+
+            const zones = Array.isArray(hm.zones) ? hm.zones : [];
+            for (const z of zones) {
+                const yTop = toY(z.top);
+                const yBot = toY(z.bottom);
+                const y1 = Math.min(yTop, yBot);
+                const y2 = Math.max(yTop, yBot);
+                const height = Math.max(8, y2 - y1);
+                const base = z.side === 'DEMAND' ? '14,203,129' : (z.side === 'SUPPLY' ? '246,70,93' : '240,185,11');
+                const alpha = 0.08 + 0.35 * (z.strength || 0.3);
+                bands.push('<div class="heat-band" style="top:' + y1 + 'px;height:' + height + 'px;background:rgba(' + base + ',' + alpha + ');"></div>');
+            }
+
+            const points = Array.isArray(hm.points) ? hm.points : [];
+            for (const p of points) {
+                const y = toY(p.price);
+                const base = p.side === 'DEMAND' ? '14,203,129' : (p.side === 'SUPPLY' ? '246,70,93' : '240,185,11');
+                const alpha = 0.25 + 0.55 * (p.strength || 0.4);
+                bands.push('<div class="heat-line" style="top:' + (y - 1) + 'px;background:rgba(' + base + ',' + alpha + ');"></div>');
+                if (p.kind === 'POC' || p.kind === 'BPOC' || p.kind === 'SPOC') {
+                    bands.push('<div class="heat-label" style="top:' + y + 'px;">' + p.tf.toUpperCase() + ' ' + p.kind + ' • ' + fmt(p.price) + '</div>');
+                }
+            }
+
+            const yLast = toY(hm.last);
+            bands.push('<div class="heat-last" style="top:' + yLast + 'px;"></div>');
+            bands.push('<div class="heat-label" style="top:' + yLast + 'px;right:12px;">LAST • ' + fmt(hm.last) + '</div>');
+
+            root.innerHTML = bands.join('');
+        }
     </script>
 </body>
 </html>`;
