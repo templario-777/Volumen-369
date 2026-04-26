@@ -41,6 +41,10 @@ async function checkSymbolExists(symbol) {
   try {
     const data = await fetchBinance(`https://api.binance.com/api/v3/ticker/price?symbol=${symbol}`);
     return { exists: !!data.symbol };
+  } catch (e) {}
+  try {
+    const data = await fetchBinance(`https://fapi.binance.com/fapi/v1/ticker/price?symbol=${symbol}`);
+    return { exists: !!data.symbol };
   } catch (e) { return { exists: false }; }
 }
 
@@ -68,6 +72,8 @@ async function getProAnalysis(symbol) {
   } catch(e) {}
 
   const lastPrice = parseFloat(c15m[c15m.length-1][4]);
+
+  const arb = await computeSpotFuturesArb(symbol);
   
   // ANALISIS DE GRAVEDAD DEL ORDER BOOK (BIDS VS ASKS)
   const totalBids = depth.bids.reduce((a, b) => a + parseFloat(b[1]), 0);
@@ -159,6 +165,8 @@ async function getProAnalysis(symbol) {
     mtf,
     chartPrime: cp,
     supplyDemand: sd,
+    supportResistance: pickSupportResistance(sd, lastPrice),
+    arb,
     liqShorts: (profiles["4h"].magnetUp ?? (lastPrice * 1.02)).toFixed(fmtDp),
     liqLongs: (profiles["4h"].magnetDown ?? (lastPrice * 0.98)).toFixed(fmtDp),
     idea,
@@ -194,6 +202,73 @@ async function fetchDepth(symbol, limit) {
   } catch (e) {
     return await fetchBinance(`https://fapi.binance.com/fapi/v1/depth?symbol=${symbol}&limit=${limit}`);
   }
+}
+
+async function computeSpotFuturesArb(symbol) {
+  const out = { spotMid: null, futuresMid: null, basisPct: null, ok: false };
+  let spot = null;
+  let fut = null;
+  try {
+    spot = await fetchBinance(`https://api.binance.com/api/v3/ticker/bookTicker?symbol=${symbol}`);
+  } catch (e) {}
+  try {
+    fut = await fetchBinance(`https://fapi.binance.com/fapi/v1/ticker/bookTicker?symbol=${symbol}`);
+  } catch (e) {}
+
+  const sb = spot && spot.bidPrice != null ? parseFloat(spot.bidPrice) : null;
+  const sa = spot && spot.askPrice != null ? parseFloat(spot.askPrice) : null;
+  const fb = fut && fut.bidPrice != null ? parseFloat(fut.bidPrice) : null;
+  const fa = fut && fut.askPrice != null ? parseFloat(fut.askPrice) : null;
+
+  const sMid = (sb != null && sa != null) ? (sb + sa) / 2 : null;
+  const fMid = (fb != null && fa != null) ? (fb + fa) / 2 : null;
+
+  out.spotMid = sMid;
+  out.futuresMid = fMid;
+  if (sMid != null && fMid != null && sMid !== 0) {
+    out.basisPct = ((fMid - sMid) / sMid) * 100;
+    out.ok = true;
+  }
+  return out;
+}
+
+function pickSupportResistance(sd, price) {
+  const order = ["15m", "1h", "4h", "1d"];
+  const res = { support: null, resistance: null };
+  for (const tf of order) {
+    const z = sd[tf];
+    if (!z) continue;
+    const demands = z.demand || [];
+    const supplies = z.supply || [];
+
+    let bestSup = null;
+    let bestSupDist = Infinity;
+    for (const s of supplies) {
+      const lvl = s.bottom;
+      if (lvl == null) continue;
+      const dist = lvl - price;
+      if (dist >= 0 && dist < bestSupDist) {
+        bestSupDist = dist;
+        bestSup = { tf, price: lvl };
+      }
+    }
+
+    let bestDem = null;
+    let bestDemDist = Infinity;
+    for (const d of demands) {
+      const lvl = d.top;
+      if (lvl == null) continue;
+      const dist = price - lvl;
+      if (dist >= 0 && dist < bestDemDist) {
+        bestDemDist = dist;
+        bestDem = { tf, price: lvl };
+      }
+    }
+
+    if (bestDem && res.support == null) res.support = bestDem;
+    if (bestSup && res.resistance == null) res.resistance = bestSup;
+  }
+  return res;
 }
 
 function computeVolumeProfile(candles, currentPrice, bins) {
@@ -800,6 +875,24 @@ async function handleDashboard() {
                             <div class="row mt-3">
                                 <div class="col-12"><div class="metric-label">SENTIMIENTO</div><div id="sentimentBox" class="h4" style="color:#fff;"></div></div>
                             </div>
+                            <hr>
+                            <div class="row">
+                                <div class="col-12">
+                                    <div class="metric-label">SPOT-FUTURES ARB (BASIS)</div>
+                                    <div id="arbBasis" class="h5" style="color:#fff;">---</div>
+                                    <div id="arbDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col-6">
+                                    <div class="metric-label">SOPORTE</div>
+                                    <div id="srSupport" class="h5" style="color:#fff;">---</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="metric-label">RESISTENCIA</div>
+                                    <div id="srResistance" class="h5" style="color:#fff;">---</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
                     <div class="col-12">
@@ -826,6 +919,45 @@ async function handleDashboard() {
                                     <div class="metric-label">Volume Cluster 1D</div>
                                     <div id="clusterLevel" class="h5" style="color:#fff;"></div>
                                     <div id="clusterDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-12">
+                        <div class="card">
+                            <h5 class="metric-label text-center">HFT / V-SHAPE (TIEMPO REAL)</h5>
+                            <div class="row mt-3">
+                                <div class="col-6">
+                                    <div class="metric-label">TPS</div>
+                                    <div id="hftTps" class="h4" style="color:#fff;">---</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="metric-label">MS/TRADE</div>
+                                    <div id="hftMs" class="h4" style="color:#fff;">---</div>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col-6">
+                                    <div class="metric-label">RATIO BUY/SELL</div>
+                                    <div id="hftRatio" class="h4" style="color:#fff;">---</div>
+                                </div>
+                                <div class="col-6">
+                                    <div class="metric-label">V-SHAPE</div>
+                                    <div id="vshape" class="h4" style="color:#fff;">---</div>
+                                </div>
+                            </div>
+                            <hr>
+                            <div class="row">
+                                <div class="col-12">
+                                    <div class="metric-label">DECISIÓN</div>
+                                    <div id="decision" class="h4" style="color:#fff;">---</div>
+                                    <div id="decisionDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col-12">
+                                    <div class="metric-label">AUTO BREAKEVEN</div>
+                                    <div id="breakeven" class="h5" style="color:#fff;">---</div>
                                 </div>
                             </div>
                         </div>
@@ -917,8 +1049,198 @@ async function handleDashboard() {
             }
         }
 
+        let hftWs = null;
+        let hftMode = "FUTURES";
+        let hftTrades = [];
+        let hftPriceSeries = [];
+        let hftLastTs = null;
+        let hftIntervals = [];
+        let lastAnalysis = null;
+
+        function resetHft() {
+            hftTrades = [];
+            hftPriceSeries = [];
+            hftLastTs = null;
+            hftIntervals = [];
+            setText('hftTps', '---');
+            setText('hftMs', '---');
+            setText('hftRatio', '---');
+            setText('vshape', '---');
+            setText('decision', '---');
+            setText('decisionDetails', '');
+            setText('breakeven', '---');
+        }
+
+        function setText(id, v) {
+            const el = document.getElementById(id);
+            if (el) el.innerText = v;
+        }
+
+        function closeHft() {
+            try { if (hftWs) hftWs.close(); } catch (e) {}
+            hftWs = null;
+        }
+
+        function startHft(symbol, prefer) {
+            closeHft();
+            resetHft();
+            const s = symbol.toLowerCase();
+            hftMode = prefer || "FUTURES";
+            const url = hftMode === "FUTURES"
+                ? ("wss://fstream.binance.com/ws/" + s + "@aggTrade")
+                : ("wss://stream.binance.com:9443/ws/" + s + "@trade");
+
+            try {
+                hftWs = new WebSocket(url);
+            } catch (e) {
+                hftWs = null;
+                return;
+            }
+
+            hftWs.onmessage = function(ev) {
+                try {
+                    const msg = JSON.parse(ev.data);
+                    const ts = msg.T || msg.E || Date.now();
+                    const price = parseFloat(msg.p || msg.P || msg.a || msg.c);
+                    const qty = parseFloat(msg.q || msg.Q || msg.v);
+                    const m = !!msg.m;
+                    const buyAgg = !m;
+                    if (!Number.isFinite(price) || !Number.isFinite(qty)) return;
+
+                    if (hftLastTs != null) {
+                        const dt = ts - hftLastTs;
+                        if (dt > 0 && dt < 20000) {
+                            hftIntervals.push(dt);
+                            if (hftIntervals.length > 300) hftIntervals.shift();
+                        }
+                    }
+                    hftLastTs = ts;
+
+                    hftTrades.push({ ts: ts, price: price, qty: qty, buy: buyAgg });
+                    if (hftTrades.length > 5000) hftTrades.shift();
+
+                    hftPriceSeries.push({ ts: ts, price: price });
+                    while (hftPriceSeries.length && (ts - hftPriceSeries[0].ts) > 70000) hftPriceSeries.shift();
+
+                    updateHftMetrics();
+                } catch (e) {}
+            };
+
+            hftWs.onclose = function() {
+                if (hftMode === "FUTURES") {
+                    startHft(symbol, "SPOT");
+                }
+            };
+
+            hftWs.onerror = function() {
+                try { if (hftWs) hftWs.close(); } catch (e) {}
+            };
+        }
+
+        function updateHftMetrics() {
+            const now = Date.now();
+            const t1s = now - 1000;
+            const t5s = now - 5000;
+            const t60s = now - 60000;
+
+            let c1 = 0;
+            let buyV = 0;
+            let sellV = 0;
+            for (let i = hftTrades.length - 1; i >= 0; i--) {
+                const tr = hftTrades[i];
+                if (tr.ts < t60s) break;
+                if (tr.ts >= t1s) c1++;
+                if (tr.ts >= t5s) {
+                    const notional = tr.price * tr.qty;
+                    if (tr.buy) buyV += notional; else sellV += notional;
+                }
+            }
+
+            const tps = c1;
+            const ratio = sellV > 0 ? (buyV / sellV) : (buyV > 0 ? 999 : 1);
+            const ms = hftIntervals.length
+                ? (hftIntervals.reduce((a, b) => a + b, 0) / hftIntervals.length)
+                : null;
+
+            setText('hftTps', String(tps));
+            setText('hftMs', ms != null ? ms.toFixed(0) : '---');
+            setText('hftRatio', ratio >= 999 ? '∞' : ratio.toFixed(2));
+
+            const v = detectVShape(tps, ratio);
+            setText('vshape', v);
+
+            if (lastAnalysis) {
+                updateDecision(lastAnalysis, { tps: tps, ratio: ratio, vshape: v, ms: ms, buyV: buyV, sellV: sellV });
+            }
+        }
+
+        function detectVShape(tps, ratio) {
+            if (hftPriceSeries.length < 5) return '---';
+            const now = Date.now();
+            const recent = hftPriceSeries.filter(p => p.ts >= (now - 60000));
+            if (recent.length < 5) return '---';
+            let min = recent[0].price;
+            let minTs = recent[0].ts;
+            for (let i = 1; i < recent.length; i++) {
+                if (recent[i].price < min) {
+                    min = recent[i].price;
+                    minTs = recent[i].ts;
+                }
+            }
+            const cur = recent[recent.length - 1].price;
+            const reboundPct = min > 0 ? ((cur - min) / min) * 100 : 0;
+            const ready = reboundPct >= 0.18 && (now - minTs) <= 60000 && tps >= 60 && ratio >= 2.2;
+            return ready ? 'READY' : 'NO';
+        }
+
+        function updateDecision(d, live) {
+            const entry = d && d.plan && d.plan.entry ? parseFloat(d.plan.entry) : null;
+            const price = d && d.price ? parseFloat(d.price) : null;
+            if (entry == null || price == null) return;
+
+            const distPct = entry ? (Math.abs(price - entry) / entry) * 100 : 999;
+            const nearMagnet = distPct <= 0.25;
+
+            const dd = d.delta || {};
+            const deltaOk = dd.status === 'BULLISH_ABSORPTION' || dd.status === 'BEARISH_ABSORPTION';
+
+            const sp = d.slippage || {};
+            const slipOk = sp.abort === false;
+
+            const cl = d.cluster1d || {};
+            const clusterOk = cl.level === 'ALTO' || cl.level === 'MEDIO';
+
+            const arb = d.arb || {};
+            const arbOk = arb.ok === true;
+
+            const tpsOk = live && live.tps != null ? live.tps >= 80 : false;
+            const ratioOk = live && live.ratio != null ? live.ratio >= 3.0 : false;
+            const vReady = live && live.vshape === 'READY';
+
+            const ok = nearMagnet && deltaOk && slipOk && clusterOk && (arbOk || true) && tpsOk && ratioOk && vReady;
+
+            const reasons = [];
+            if (!nearMagnet) reasons.push('Lejos del imán (' + distPct.toFixed(2) + '%)');
+            if (!deltaOk) reasons.push('Sin absorción (Delta)');
+            if (!slipOk) reasons.push('Slippage/Spread alto');
+            if (!clusterOk) reasons.push('Cluster 1D débil');
+            if (!tpsOk) reasons.push('TPS bajo');
+            if (!ratioOk) reasons.push('Ratio bajo');
+            if (!vReady) reasons.push('V-Shape no');
+
+            setText('decision', ok ? 'OPERAR' : 'NO OPERAR');
+            setText('decisionDetails', ok ? 'Cumple reglas (HFT + Absorción + Imán)' : reasons.join(' | '));
+
+            if (ok) {
+                setText('breakeven', 'Mover SL a ENTRADA si +0.35% a favor o en 2 min');
+            } else {
+                setText('breakeven', '---');
+            }
+        }
+
         async function loadData() {
             const d = await (await fetch(\`/api/pro-analysis?symbol=\${currentSymbol}\`)).json();
+            lastAnalysis = d;
             document.getElementById('price').innerText = d.price.toLocaleString();
             document.getElementById('curSymbol').innerText = d.symbol;
             document.getElementById('liqShorts').innerText = d.liqShorts;
@@ -984,6 +1306,31 @@ async function handleDashboard() {
             const cl = d.cluster1d || {};
             document.getElementById('clusterLevel').innerText = (cl.level || '---') + ' (Strength: ' + (cl.strength != null ? (cl.strength * 100).toFixed(0) : '---') + '%)';
             document.getElementById('clusterDetails').innerText = 'Centro: ' + (cl.clusterPrice != null ? Number(cl.clusterPrice).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '---') + ' | Dist: ' + (cl.distancePct != null ? cl.distancePct.toFixed(2) : '---') + '%';
+
+            const arb = d.arb || {};
+            if (arb.ok) {
+                document.getElementById('arbBasis').innerText = (arb.basisPct != null ? arb.basisPct.toFixed(3) : '---') + '%';
+                document.getElementById('arbDetails').innerText = 'Spot: ' + (arb.spotMid != null ? Number(arb.spotMid).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '---') + ' | Fut: ' + (arb.futuresMid != null ? Number(arb.futuresMid).toLocaleString(undefined, { maximumFractionDigits: 6 }) : '---');
+            } else {
+                document.getElementById('arbBasis').innerText = '---';
+                document.getElementById('arbDetails').innerText = '';
+            }
+
+            const sr = d.supportResistance || {};
+            document.getElementById('srSupport').innerText = sr.support ? (sr.support.price.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' (' + sr.support.tf.toUpperCase() + ')') : '---';
+            document.getElementById('srResistance').innerText = sr.resistance ? (sr.resistance.price.toLocaleString(undefined, { maximumFractionDigits: 6 }) + ' (' + sr.resistance.tf.toUpperCase() + ')') : '---';
+
+            const entry = d && d.plan && d.plan.entry ? parseFloat(d.plan.entry) : null;
+            const price = d && d.price ? parseFloat(d.price) : null;
+            if (entry != null && price != null) {
+                const distPct = entry ? (Math.abs(price - entry) / entry) * 100 : 999;
+                if (distPct <= 0.35) {
+                    if (!hftWs) startHft(d.symbol, "FUTURES");
+                } else {
+                    if (hftWs) closeHft();
+                    resetHft();
+                }
+            }
         }
 
         initChart(currentSymbol); loadData(); setInterval(loadData, 10000);
