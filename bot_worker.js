@@ -871,13 +871,20 @@ async function handleDashboard() {
 
         .container-fluid { padding: clamp(12px, 2vw, 24px) !important; }
 
-        .main-grid { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
-        :root[data-layout="desktop"] .main-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
-        .main-left, .main-right { width: 100%; max-width: 100%; padding: 0; margin: 0; }
-        :root[data-layout="desktop"] .main-left,
-        :root[data-layout="desktop"] .main-right { width: auto; max-width: none; }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr; grid-template-areas: "prices" "filters" "market"; gap: 16px; align-items: start; }
+        :root[data-layout="desktop"] .dashboard-grid { grid-template-columns: minmax(320px, 1fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "prices prices prices" "filters market market"; gap: 24px; }
 
-        .right-grid { display: flex; flex-direction: column; gap: 16px; }
+        .area-prices { grid-area: prices; }
+        .area-filters { grid-area: filters; }
+        .area-market { grid-area: market; }
+
+        .prices-grid { display: grid; grid-template-columns: 1fr; grid-template-areas: "plan" "price" "levels"; gap: 16px; }
+        :root[data-layout="desktop"] .prices-grid { grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); grid-template-areas: "plan price" "levels levels"; gap: 24px; }
+
+        .filters-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+        .market-grid { display: grid; grid-template-columns: 1fr; gap: 16px; }
+
+        .card.p-0 { padding: 0 !important; overflow: hidden; }
         
         .metric-label { color: #d5d9e0; font-size: 1.02rem; text-transform: uppercase; letter-spacing: 1px; }
         .metric-value { font-size: clamp(1.9rem, 4.2vw, 2.9rem); font-weight: 900; color: var(--yellow); text-shadow: 0 0 15px rgba(240, 185, 11, 0.4); }
@@ -893,7 +900,7 @@ async function handleDashboard() {
         .liq-shorts { background: rgba(14, 203, 129, 0.15); border-color: var(--green); }
         .liq-longs { background: rgba(246, 70, 93, 0.15); border-color: var(--red); }
         
-        .chart-container { height: clamp(380px, 60vh, 640px); border-radius: 20px; overflow: hidden; border: 3px solid #474d57; }
+        .chart-container { height: clamp(360px, 60vh, 660px); border-radius: 0; overflow: hidden; border: 0; }
         #idea-pill { background: var(--yellow); color: #000; padding: 12px 25px; border-radius: 12px; font-size: 1.3rem; font-weight: 900; box-shadow: 0 5px 15px rgba(240, 185, 11, 0.4); }
         
         .gravity-bar { height: 12px; background: #2b3139; border-radius: 10px; margin-top: 10px; overflow: hidden; border: 1px solid #474d57; }
@@ -970,34 +977,30 @@ async function handleDashboard() {
             <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO (BTC, ETH...)" onkeypress="if(event.key==='Enter') updateSymbol()">
         </div>
 
-        <div class="main-grid">
-            <div class="main-left">
-                <div class="chart-container" id="tv_chart"></div>
-                <!-- PLAN MAGNET GRAVITY -->
-                <div class="card mt-4">
-                    <div class="d-flex justify-content-between align-items-center">
-                        <div>
-                            <h4 class="metric-label m-0">🎯 ENTRADA EN IMÁN DE LIQUIDACIÓN</h4>
-                            <div id="idea-pill" class="mt-2">BUSCANDO GRAVEDAD...</div>
+        <div class="dashboard-grid">
+            <div class="area-prices">
+                <div class="prices-grid">
+                    <div class="card" style="grid-area: plan;">
+                        <div class="d-flex justify-content-between align-items-center">
+                            <div>
+                                <h4 class="metric-label m-0">🎯 ENTRADA EN IMÁN DE LIQUIDACIÓN</h4>
+                                <div id="idea-pill" class="mt-2">BUSCANDO GRAVEDAD...</div>
+                            </div>
+                            <div class="text-end" style="width: min(320px, 48vw);">
+                                <div class="metric-label">FUERZA DE GRAVEDAD (<span id="gravitySource">---</span>)</div>
+                                <div class="gravity-bar"><div id="gravityFill" class="gravity-fill" style="width: 0%"></div></div>
+                                <div id="gravityPower" class="mt-1" style="color: var(--yellow);">---</div>
+                            </div>
                         </div>
-                        <div class="text-end" style="width: min(320px, 48vw);">
-                            <div class="metric-label">FUERZA DE GRAVEDAD (<span id="gravitySource">---</span>)</div>
-                            <div class="gravity-bar"><div id="gravityFill" class="gravity-fill" style="width: 0%"></div></div>
-                            <div id="gravityPower" class="mt-1" style="color: var(--yellow);">---</div>
+                        <div class="row text-center mt-4">
+                        <div class="col-6 col-md-3"><div class="metric-label">ENTRADA (IMÁN)</div><div id="planEntry" class="plan-val mono" style="color: var(--yellow);">---</div><div id="planEntryTf" style="color:#d5d9e0; font-size:0.95rem;"></div></div>
+                            <div class="col-6 col-md-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="SELL plan-val">---</div></div>
+                            <div class="col-6 col-md-3 mt-3 mt-md-0"><div class="metric-label text-success">TARGET 1 (REBOTE)</div><div id="planTP1" class="BUY plan-val">---</div></div>
+                        <div class="col-6 col-md-3 mt-3 mt-md-0"><div class="metric-label text-warning">TARGET 2 (IMÁN OPUESTO)</div><div id="planTP2" class="plan-val mono" style="color: #fff;">---</div><div id="planTargetTf" style="color:#d5d9e0; font-size:0.95rem;"></div></div>
                         </div>
                     </div>
-                    <div class="row text-center mt-4">
-                    <div class="col-6 col-md-3"><div class="metric-label">ENTRADA (IMÁN)</div><div id="planEntry" class="plan-val mono" style="color: var(--yellow);">---</div><div id="planEntryTf" style="color:#d5d9e0; font-size:0.95rem;"></div></div>
-                        <div class="col-6 col-md-3"><div class="metric-label text-danger">STOP LOSS</div><div id="planSL" class="SELL plan-val">---</div></div>
-                        <div class="col-6 col-md-3 mt-3 mt-md-0"><div class="metric-label text-success">TARGET 1 (REBOTE)</div><div id="planTP1" class="BUY plan-val">---</div></div>
-                    <div class="col-6 col-md-3 mt-3 mt-md-0"><div class="metric-label text-warning">TARGET 2 (IMÁN OPUESTO)</div><div id="planTP2" class="plan-val mono" style="color: #fff;">---</div><div id="planTargetTf" style="color:#d5d9e0; font-size:0.95rem;"></div></div>
-                    </div>
-                </div>
-            </div>
 
-            <div class="main-right">
-                <div class="right-grid">
-                    <div class="card text-center">
+                    <div class="card text-center" style="grid-area: price;">
                         <div class="metric-label">PRECIO ACTUAL <span id="curSymbol" class="text-white">BTCUSDT</span></div>
                         <div id="price" class="metric-value">---</div>
                         <hr>
@@ -1032,6 +1035,32 @@ async function handleDashboard() {
                         </div>
                     </div>
 
+                    <div class="card" style="grid-area: levels;">
+                        <h5 class="metric-label text-center">NIVELES DE ENTRADA ALGORÍTMICA (IMANES)</h5>
+                        <div class="mtf-wrap">
+                          <table class="mtf-table">
+                              <tbody>
+                                  <tr><td class="mtf-tag">15M</td><td>BPOC</td><td id="buy15m" class="mono"></td><td>POC</td><td id="poc15m" class="mono"></td><td>SPOC</td><td id="sell15m" class="mono"></td></tr>
+                                  <tr><td class="mtf-tag">1H</td><td>BPOC</td><td id="buy1h" class="mono"></td><td>POC</td><td id="poc1h" class="mono"></td><td>SPOC</td><td id="sell1h" class="mono"></td></tr>
+                                  <tr><td class="mtf-tag">4H</td><td>BPOC</td><td id="buy4h" class="mono"></td><td>POC</td><td id="poc4h" class="mono"></td><td>SPOC</td><td id="sell4h" class="mono"></td></tr>
+                                  <tr><td class="mtf-tag">1D</td><td>BPOC</td><td id="buy1d" class="mono"></td><td>POC</td><td id="poc1d" class="mono"></td><td>SPOC</td><td id="sell1d" class="mono"></td></tr>
+                              </tbody>
+                          </table>
+                        </div>
+                        <div class="liq-zone liq-shorts">
+                            <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (PUNTO DE REBOTE)</div>
+                            <div id="liqShorts" class="BUY h1 m-0 mono">---</div>
+                        </div>
+                        <div class="liq-zone liq-longs">
+                            <div class="metric-label text-danger">LIQUIDACIÓN DE LONGS (PUNTO DE REBOTE)</div>
+                            <div id="liqLongs" class="SELL h1 m-0 mono">---</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="area-filters">
+                <div class="filters-grid">
                     <div class="card">
                         <h5 class="metric-label text-center">FILTROS V6 (PRECISIÓN)</h5>
                         <div class="row mt-3">
@@ -1057,17 +1086,6 @@ async function handleDashboard() {
                                 <div id="clusterDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
                             </div>
                         </div>
-                    </div>
-
-                    <div class="card">
-                        <h5 class="metric-label text-center">HEATMAP DE LIQUIDACIÓN (V8)</h5>
-                        <div id="heatmap" class="heatmap"></div>
-                        <div class="heat-legend">
-                            <span class="pill">Arriba = Supply</span>
-                            <span class="pill">Centro = POC</span>
-                            <span class="pill">Abajo = Demand</span>
-                        </div>
-                        <div id="heatmapList" class="heat-list"></div>
                     </div>
 
                     <div class="card">
@@ -1114,27 +1132,24 @@ async function handleDashboard() {
                             </div>
                         </div>
                     </div>
+                </div>
+            </div>
 
+            <div class="area-market">
+                <div class="market-grid">
                     <div class="card">
-                        <h5 class="metric-label text-center">NIVELES DE ENTRADA ALGORÍTMICA (IMANES)</h5>
-                        <div class="mtf-wrap">
-                          <table class="mtf-table">
-                              <tbody>
-                                  <tr><td class="mtf-tag">15M</td><td>BPOC</td><td id="buy15m" class="mono"></td><td>POC</td><td id="poc15m" class="mono"></td><td>SPOC</td><td id="sell15m" class="mono"></td></tr>
-                                  <tr><td class="mtf-tag">1H</td><td>BPOC</td><td id="buy1h" class="mono"></td><td>POC</td><td id="poc1h" class="mono"></td><td>SPOC</td><td id="sell1h" class="mono"></td></tr>
-                                  <tr><td class="mtf-tag">4H</td><td>BPOC</td><td id="buy4h" class="mono"></td><td>POC</td><td id="poc4h" class="mono"></td><td>SPOC</td><td id="sell4h" class="mono"></td></tr>
-                                  <tr><td class="mtf-tag">1D</td><td>BPOC</td><td id="buy1d" class="mono"></td><td>POC</td><td id="poc1d" class="mono"></td><td>SPOC</td><td id="sell1d" class="mono"></td></tr>
-                              </tbody>
-                          </table>
+                        <h5 class="metric-label text-center">HEATMAP DE LIQUIDACIÓN (V8)</h5>
+                        <div id="heatmap" class="heatmap"></div>
+                        <div class="heat-legend">
+                            <span class="pill">Arriba = Supply</span>
+                            <span class="pill">Centro = POC</span>
+                            <span class="pill">Abajo = Demand</span>
                         </div>
-                        <div class="liq-zone liq-shorts">
-                            <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (PUNTO DE REBOTE)</div>
-                            <div id="liqShorts" class="BUY h1 m-0 mono">---</div>
-                        </div>
-                        <div class="liq-zone liq-longs">
-                            <div class="metric-label text-danger">LIQUIDACIÓN DE LONGS (PUNTO DE REBOTE)</div>
-                            <div id="liqLongs" class="SELL h1 m-0 mono">---</div>
-                        </div>
+                        <div id="heatmapList" class="heat-list"></div>
+                    </div>
+
+                    <div class="card p-0">
+                        <div class="chart-container" id="tv_chart"></div>
                     </div>
                 </div>
             </div>
