@@ -869,12 +869,13 @@ async function handleDashboard() {
         .card { background: var(--card); border: 3px solid #474d57; border-radius: 20px; padding: 30px; box-shadow: 0 15px 30px rgba(0,0,0,0.7); }
         h1 { font-size: clamp(1.35rem, 3.2vw, 2.3rem); }
 
+        .container-fluid { padding: clamp(12px, 2vw, 24px) !important; }
+
         .main-grid { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
         :root[data-layout="desktop"] .main-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
-        .main-grid > .col-lg-8,
-        .main-grid > .col-lg-4 { width: 100%; max-width: 100%; padding: 0; margin: 0; }
-        :root[data-layout="desktop"] .main-grid > .col-lg-8,
-        :root[data-layout="desktop"] .main-grid > .col-lg-4 { width: auto; max-width: none; }
+        .main-left, .main-right { width: 100%; max-width: 100%; padding: 0; margin: 0; }
+        :root[data-layout="desktop"] .main-left,
+        :root[data-layout="desktop"] .main-right { width: auto; max-width: none; }
 
         .right-grid { display: flex; flex-direction: column; gap: 16px; }
         
@@ -970,7 +971,7 @@ async function handleDashboard() {
         </div>
 
         <div class="main-grid">
-            <div class="col-lg-8">
+            <div class="main-left">
                 <div class="chart-container" id="tv_chart"></div>
                 <!-- PLAN MAGNET GRAVITY -->
                 <div class="card mt-4">
@@ -994,151 +995,145 @@ async function handleDashboard() {
                 </div>
             </div>
 
-            <div class="col-lg-4">
+            <div class="main-right">
                 <div class="right-grid">
-                    <div class="col-12">
-                        <div class="card text-center">
-                            <div class="metric-label">PRECIO ACTUAL <span id="curSymbol" class="text-white">BTCUSDT</span></div>
-                            <div id="price" class="metric-value">---</div>
-                            <hr>
-                            <div class="row">
-                                <div class="col-6"><div class="metric-label">FUNDING</div><div id="funding" class="h5">---</div></div>
-                                <div class="col-6"><div class="metric-label">OPEN INTEREST</div><div id="oi" class="h5">---</div></div>
+                    <div class="card text-center">
+                        <div class="metric-label">PRECIO ACTUAL <span id="curSymbol" class="text-white">BTCUSDT</span></div>
+                        <div id="price" class="metric-value">---</div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-6"><div class="metric-label">FUNDING</div><div id="funding" class="h5">---</div></div>
+                            <div class="col-6"><div class="metric-label">OPEN INTEREST</div><div id="oi" class="h5">---</div></div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-6"><div class="metric-label">OI Δ</div><div id="oiChange" class="h5">---</div></div>
+                            <div class="col-6"><div class="metric-label">OB Δ</div><div id="obImb" class="h5">---</div></div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12"><div class="metric-label">SENTIMIENTO</div><div id="sentimentBox" class="h4" style="color:#fff;"></div></div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-12">
+                                <div class="metric-label">SPOT-FUTURES ARB (BASIS)</div>
+                                <div id="arbBasis" class="h5" style="color:#fff;">---</div>
+                                <div id="arbDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
                             </div>
-                            <div class="row mt-3">
-                                <div class="col-6"><div class="metric-label">OI Δ</div><div id="oiChange" class="h5">---</div></div>
-                                <div class="col-6"><div class="metric-label">OB Δ</div><div id="obImb" class="h5">---</div></div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-6">
+                                <div class="metric-label">SOPORTE</div>
+                                <div id="srSupport" class="h5" style="color:#fff;">---</div>
                             </div>
-                            <div class="row mt-3">
-                                <div class="col-12"><div class="metric-label">SENTIMIENTO</div><div id="sentimentBox" class="h4" style="color:#fff;"></div></div>
-                            </div>
-                            <hr>
-                            <div class="row">
-                                <div class="col-12">
-                                    <div class="metric-label">SPOT-FUTURES ARB (BASIS)</div>
-                                    <div id="arbBasis" class="h5" style="color:#fff;">---</div>
-                                    <div id="arbDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
-                                </div>
-                            </div>
-                            <div class="row mt-3">
-                                <div class="col-6">
-                                    <div class="metric-label">SOPORTE</div>
-                                    <div id="srSupport" class="h5" style="color:#fff;">---</div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="metric-label">RESISTENCIA</div>
-                                    <div id="srResistance" class="h5" style="color:#fff;">---</div>
-                                </div>
+                            <div class="col-6">
+                                <div class="metric-label">RESISTENCIA</div>
+                                <div id="srResistance" class="h5" style="color:#fff;">---</div>
                             </div>
                         </div>
                     </div>
-                    <div class="col-12">
-                        <div class="card">
-                            <h5 class="metric-label text-center">FILTROS V6 (PRECISIÓN)</h5>
-                            <div class="row mt-3">
-                                <div class="col-12">
-                                    <div class="metric-label">Delta Divergence</div>
-                                    <div id="deltaStatus" class="h5" style="color:#fff;"></div>
-                                    <div id="deltaDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
-                                </div>
+
+                    <div class="card">
+                        <h5 class="metric-label text-center">FILTROS V6 (PRECISIÓN)</h5>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <div class="metric-label">Delta Divergence</div>
+                                <div id="deltaStatus" class="h5" style="color:#fff;"></div>
+                                <div id="deltaDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
                             </div>
-                            <hr>
-                            <div class="row">
-                                <div class="col-12">
-                                    <div class="metric-label">Slippage Predictor</div>
-                                    <div id="slipStatus" class="h5" style="color:#fff;"></div>
-                                    <div id="slipDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
-                                </div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-12">
+                                <div class="metric-label">Slippage Predictor</div>
+                                <div id="slipStatus" class="h5" style="color:#fff;"></div>
+                                <div id="slipDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
                             </div>
-                            <hr>
-                            <div class="row">
-                                <div class="col-12">
-                                    <div class="metric-label">Volume Cluster 1D</div>
-                                    <div id="clusterLevel" class="h5" style="color:#fff;"></div>
-                                    <div id="clusterDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
-                                </div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-12">
+                                <div class="metric-label">Volume Cluster 1D</div>
+                                <div id="clusterLevel" class="h5" style="color:#fff;"></div>
+                                <div id="clusterDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
                             </div>
                         </div>
                     </div>
-                    <div class="col-12">
-                        <div class="card">
-                            <h5 class="metric-label text-center">HEATMAP DE LIQUIDACIÓN (V8)</h5>
-                            <div id="heatmap" class="heatmap"></div>
-                            <div class="heat-legend">
-                                <span class="pill">Arriba = Supply</span>
-                                <span class="pill">Centro = POC</span>
-                                <span class="pill">Abajo = Demand</span>
-                            </div>
-                            <div id="heatmapList" class="heat-list"></div>
+
+                    <div class="card">
+                        <h5 class="metric-label text-center">HEATMAP DE LIQUIDACIÓN (V8)</h5>
+                        <div id="heatmap" class="heatmap"></div>
+                        <div class="heat-legend">
+                            <span class="pill">Arriba = Supply</span>
+                            <span class="pill">Centro = POC</span>
+                            <span class="pill">Abajo = Demand</span>
                         </div>
+                        <div id="heatmapList" class="heat-list"></div>
                     </div>
-                    <div class="col-12">
-                        <div class="card">
-                            <h5 class="metric-label text-center">HFT / V-SHAPE (TIEMPO REAL)</h5>
-                            <div class="row mt-3">
-                                <div class="col-6">
-                                    <div class="metric-label">TPS</div>
-                                    <div id="hftTps" class="h4" style="color:#fff;">---</div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="metric-label">MS/TRADE</div>
-                                    <div id="hftMs" class="h4" style="color:#fff;">---</div>
-                                </div>
+
+                    <div class="card">
+                        <h5 class="metric-label text-center">HFT / V-SHAPE (TIEMPO REAL)</h5>
+                        <div class="row mt-3">
+                            <div class="col-6">
+                                <div class="metric-label">TPS</div>
+                                <div id="hftTps" class="h4" style="color:#fff;">---</div>
                             </div>
-                            <div class="row mt-3">
-                                <div class="col-6">
-                                    <div class="metric-label">RATIO BUY/SELL</div>
-                                    <div id="hftRatio" class="h4" style="color:#fff;">---</div>
-                                </div>
-                                <div class="col-6">
-                                    <div class="metric-label">V-SHAPE</div>
-                                    <div id="vshape" class="h4" style="color:#fff;">---</div>
-                                </div>
-                            </div>
-                            <hr>
-                            <div class="row">
-                                <div class="col-12">
-                                    <div class="metric-label">DECISIÓN</div>
-                                    <div id="decision" class="h4" style="color:#fff;">---</div>
-                                    <div id="decisionDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
-                                </div>
-                            </div>
-                            <div class="row mt-3">
-                                <div class="col-12">
-                                    <div class="metric-label">ESTADO HFT</div>
-                                    <div id="hftStatus" class="h5" style="color:#fff;">---</div>
-                                    <div id="hftStatusDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
-                                </div>
-                            </div>
-                            <div class="row mt-3">
-                                <div class="col-12">
-                                    <div class="metric-label">AUTO BREAKEVEN</div>
-                                    <div id="breakeven" class="h5" style="color:#fff;">---</div>
-                                </div>
+                            <div class="col-6">
+                                <div class="metric-label">MS/TRADE</div>
+                                <div id="hftMs" class="h4" style="color:#fff;">---</div>
                             </div>
                         </div>
+                        <div class="row mt-3">
+                            <div class="col-6">
+                                <div class="metric-label">RATIO BUY/SELL</div>
+                                <div id="hftRatio" class="h4" style="color:#fff;">---</div>
+                            </div>
+                            <div class="col-6">
+                                <div class="metric-label">V-SHAPE</div>
+                                <div id="vshape" class="h4" style="color:#fff;">---</div>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="row">
+                            <div class="col-12">
+                                <div class="metric-label">DECISIÓN</div>
+                                <div id="decision" class="h4" style="color:#fff;">---</div>
+                                <div id="decisionDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <div class="metric-label">ESTADO HFT</div>
+                                <div id="hftStatus" class="h5" style="color:#fff;">---</div>
+                                <div id="hftStatusDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                            </div>
+                        </div>
+                        <div class="row mt-3">
+                            <div class="col-12">
+                                <div class="metric-label">AUTO BREAKEVEN</div>
+                                <div id="breakeven" class="h5" style="color:#fff;">---</div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="col-12">
-                        <div class="card">
-                            <h5 class="metric-label text-center">NIVELES DE ENTRADA ALGORÍTMICA (IMANES)</h5>
-                            <div class="mtf-wrap">
-                              <table class="mtf-table">
-                                  <tbody>
-                                      <tr><td class="mtf-tag">15M</td><td>BPOC</td><td id="buy15m" class="mono"></td><td>POC</td><td id="poc15m" class="mono"></td><td>SPOC</td><td id="sell15m" class="mono"></td></tr>
-                                      <tr><td class="mtf-tag">1H</td><td>BPOC</td><td id="buy1h" class="mono"></td><td>POC</td><td id="poc1h" class="mono"></td><td>SPOC</td><td id="sell1h" class="mono"></td></tr>
-                                      <tr><td class="mtf-tag">4H</td><td>BPOC</td><td id="buy4h" class="mono"></td><td>POC</td><td id="poc4h" class="mono"></td><td>SPOC</td><td id="sell4h" class="mono"></td></tr>
-                                      <tr><td class="mtf-tag">1D</td><td>BPOC</td><td id="buy1d" class="mono"></td><td>POC</td><td id="poc1d" class="mono"></td><td>SPOC</td><td id="sell1d" class="mono"></td></tr>
-                                  </tbody>
-                              </table>
-                            </div>
-                            <div class="liq-zone liq-shorts">
-                                <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (PUNTO DE REBOTE)</div>
-                                <div id="liqShorts" class="BUY h1 m-0 mono">---</div>
-                            </div>
-                            <div class="liq-zone liq-longs">
-                                <div class="metric-label text-danger">LIQUIDACIÓN DE LONGS (PUNTO DE REBOTE)</div>
-                                <div id="liqLongs" class="SELL h1 m-0 mono">---</div>
-                            </div>
+
+                    <div class="card">
+                        <h5 class="metric-label text-center">NIVELES DE ENTRADA ALGORÍTMICA (IMANES)</h5>
+                        <div class="mtf-wrap">
+                          <table class="mtf-table">
+                              <tbody>
+                                  <tr><td class="mtf-tag">15M</td><td>BPOC</td><td id="buy15m" class="mono"></td><td>POC</td><td id="poc15m" class="mono"></td><td>SPOC</td><td id="sell15m" class="mono"></td></tr>
+                                  <tr><td class="mtf-tag">1H</td><td>BPOC</td><td id="buy1h" class="mono"></td><td>POC</td><td id="poc1h" class="mono"></td><td>SPOC</td><td id="sell1h" class="mono"></td></tr>
+                                  <tr><td class="mtf-tag">4H</td><td>BPOC</td><td id="buy4h" class="mono"></td><td>POC</td><td id="poc4h" class="mono"></td><td>SPOC</td><td id="sell4h" class="mono"></td></tr>
+                                  <tr><td class="mtf-tag">1D</td><td>BPOC</td><td id="buy1d" class="mono"></td><td>POC</td><td id="poc1d" class="mono"></td><td>SPOC</td><td id="sell1d" class="mono"></td></tr>
+                              </tbody>
+                          </table>
+                        </div>
+                        <div class="liq-zone liq-shorts">
+                            <div class="metric-label text-success">LIQUIDACIÓN DE SHORTS (PUNTO DE REBOTE)</div>
+                            <div id="liqShorts" class="BUY h1 m-0 mono">---</div>
+                        </div>
+                        <div class="liq-zone liq-longs">
+                            <div class="metric-label text-danger">LIQUIDACIÓN DE LONGS (PUNTO DE REBOTE)</div>
+                            <div id="liqLongs" class="SELL h1 m-0 mono">---</div>
                         </div>
                     </div>
                 </div>
