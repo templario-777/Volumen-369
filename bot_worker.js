@@ -869,10 +869,12 @@ async function handleDashboard() {
         .card { background: var(--card); border: 3px solid #474d57; border-radius: 20px; padding: 30px; box-shadow: 0 15px 30px rgba(0,0,0,0.7); }
         h1 { font-size: clamp(1.35rem, 3.2vw, 2.3rem); }
 
-        .main-grid { align-items: start; }
-        :root[data-layout="desktop"] .main-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; }
+        .main-grid { display: flex; flex-direction: column; gap: 16px; align-items: stretch; }
+        :root[data-layout="desktop"] .main-grid { display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+        .main-grid > .col-lg-8,
+        .main-grid > .col-lg-4 { width: 100%; max-width: 100%; padding: 0; margin: 0; }
         :root[data-layout="desktop"] .main-grid > .col-lg-8,
-        :root[data-layout="desktop"] .main-grid > .col-lg-4 { padding-left: 0 !important; padding-right: 0 !important; width: auto !important; max-width: none !important; }
+        :root[data-layout="desktop"] .main-grid > .col-lg-4 { width: auto; max-width: none; }
 
         .right-grid { display: flex; flex-direction: column; gap: 16px; }
         
@@ -967,7 +969,7 @@ async function handleDashboard() {
             <input type="text" id="symbolInput" class="search-box" placeholder="BUSCAR CRYPTO (BTC, ETH...)" onkeypress="if(event.key==='Enter') updateSymbol()">
         </div>
 
-        <div class="row g-4 main-grid">
+        <div class="main-grid">
             <div class="col-lg-8">
                 <div class="chart-container" id="tv_chart"></div>
                 <!-- PLAN MAGNET GRAVITY -->
@@ -993,7 +995,7 @@ async function handleDashboard() {
             </div>
 
             <div class="col-lg-4">
-                <div class="row g-4 right-grid">
+                <div class="right-grid">
                     <div class="col-12">
                         <div class="card text-center">
                             <div class="metric-label">PRECIO ACTUAL <span id="curSymbol" class="text-white">BTCUSDT</span></div>
