@@ -1066,6 +1066,13 @@ async function handleDashboard() {
                             </div>
                             <div class="row mt-3">
                                 <div class="col-12">
+                                    <div class="metric-label">ESTADO HFT</div>
+                                    <div id="hftStatus" class="h5" style="color:#fff;">---</div>
+                                    <div id="hftStatusDetails" style="color:#d5d9e0; font-size:0.95rem;"></div>
+                                </div>
+                            </div>
+                            <div class="row mt-3">
+                                <div class="col-12">
                                     <div class="metric-label">AUTO BREAKEVEN</div>
                                     <div id="breakeven" class="h5" style="color:#fff;">---</div>
                                 </div>
@@ -1176,8 +1183,8 @@ async function handleDashboard() {
             setText('hftMs', '---');
             setText('hftRatio', '---');
             setText('vshape', '---');
-            setText('decision', '---');
-            setText('decisionDetails', '');
+            setText('hftStatus', 'INACTIVO');
+            setText('hftStatusDetails', 'Esperando precio cerca del imán para activar WebSocket');
             setText('breakeven', '---');
         }
 
@@ -1206,6 +1213,14 @@ async function handleDashboard() {
                 hftWs = null;
                 return;
             }
+
+            setText('hftStatus', 'CONECTANDO (' + hftMode + ')');
+            setText('hftStatusDetails', 'Activado porque el precio está cerca del imán');
+
+            hftWs.onopen = function() {
+                setText('hftStatus', 'CONECTADO (' + hftMode + ')');
+                setText('hftStatusDetails', 'Midiendo TPS, ratio Buy/Sell y V-Shape en tiempo real');
+            };
 
             hftWs.onmessage = function(ev) {
                 try {
@@ -1239,7 +1254,10 @@ async function handleDashboard() {
             hftWs.onclose = function() {
                 if (hftMode === "FUTURES") {
                     startHft(symbol, "SPOT");
+                    return;
                 }
+                setText('hftStatus', 'DESCONECTADO');
+                setText('hftStatusDetails', 'No se pudo mantener WebSocket. Puede ser bloqueo de red.');
             };
 
             hftWs.onerror = function() {
@@ -1438,14 +1456,52 @@ async function handleDashboard() {
                 const distPct = entry ? (Math.abs(price - entry) / entry) * 100 : 999;
                 if (distPct <= 0.35) {
                     if (!hftWs) startHft(d.symbol, "FUTURES");
+                    setText('hftStatusDetails', 'Cerca del imán (' + distPct.toFixed(2) + '%)');
                 } else {
                     if (hftWs) closeHft();
                     resetHft();
+                    setText('hftStatus', 'INACTIVO');
+                    setText('hftStatusDetails', 'Lejos del imán (' + distPct.toFixed(2) + '%). El modo HFT se activa cerca del nivel.');
                 }
+
+                updateDecisionBaseline(d, distPct);
             }
         }
 
         initChart(currentSymbol); loadData(); setInterval(loadData, 10000);
+
+        function updateDecisionBaseline(d, distPct) {
+            const entry = d && d.plan && d.plan.entry ? parseFloat(d.plan.entry) : null;
+            const price = d && d.price ? parseFloat(d.price) : null;
+            if (entry == null || price == null) return;
+
+            const nearMagnet = distPct <= 0.25;
+            const dd = d.delta || {};
+            const deltaOk = dd.status === 'BULLISH_ABSORPTION' || dd.status === 'BEARISH_ABSORPTION';
+            const sp = d.slippage || {};
+            const slipOk = sp.abort === false;
+            const cl = d.cluster1d || {};
+            const clusterOk = cl.level === 'ALTO' || cl.level === 'MEDIO';
+
+            if (!nearMagnet) {
+                setText('decision', 'ESPERAR');
+                setText('decisionDetails', 'Esperando llegada al imán (' + distPct.toFixed(2) + '%)');
+                return;
+            }
+
+            if (!deltaOk || !slipOk || !clusterOk) {
+                const reasons = [];
+                if (!deltaOk) reasons.push('Sin absorción (Delta)');
+                if (!slipOk) reasons.push('Slippage/Spread alto');
+                if (!clusterOk) reasons.push('Cluster 1D débil');
+                setText('decision', 'NO OPERAR');
+                setText('decisionDetails', reasons.join(' | '));
+                return;
+            }
+
+            setText('decision', 'VALIDADO (V6)');
+            setText('decisionDetails', 'Falta confirmación HFT/V-Shape para timing exacto');
+        }
 
         function renderHeatmap(hm) {
             const root = document.getElementById('heatmap');
