@@ -871,9 +871,10 @@ async function handleDashboard() {
 
         .container-fluid { padding: clamp(12px, 2vw, 24px) !important; }
 
-        .dashboard-grid { display: grid; grid-template-columns: 1fr; grid-template-areas: "prices" "filters" "market"; gap: 16px; align-items: start; }
-        :root[data-layout="desktop"] .dashboard-grid { grid-template-columns: minmax(320px, 1fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "prices prices prices" "filters market market"; gap: 24px; }
+        .dashboard-grid { display: grid; grid-template-columns: 1fr; grid-template-areas: "chart" "prices" "filters" "market"; gap: 16px; align-items: start; }
+        :root[data-layout="desktop"] .dashboard-grid { grid-template-columns: minmax(320px, 1fr) minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "chart chart chart" "prices prices prices" "filters market market"; gap: 24px; }
 
+        .area-chart { grid-area: chart; }
         .area-prices { grid-area: prices; }
         .area-filters { grid-area: filters; }
         .area-market { grid-area: market; }
@@ -987,6 +988,11 @@ async function handleDashboard() {
         </div>
 
         <div class="dashboard-grid">
+            <div class="area-chart">
+                <div class="card p-0">
+                    <div class="chart-container" id="tv_chart"></div>
+                </div>
+            </div>
             <div class="area-prices">
                 <div class="prices-grid">
                     <div class="card" style="grid-area: plan;">
@@ -1155,10 +1161,6 @@ async function handleDashboard() {
                             <span class="pill">Abajo = Demand</span>
                         </div>
                         <div id="heatmapList" class="heat-list"></div>
-                    </div>
-
-                    <div class="card p-0">
-                        <div class="chart-container" id="tv_chart"></div>
                     </div>
                 </div>
             </div>
