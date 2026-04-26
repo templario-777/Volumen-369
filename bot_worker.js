@@ -157,7 +157,7 @@ async function getProAnalysis(symbol) {
   const delta = computeDeltaDivergence(c15m, 20);
   const slip = computeSlippagePredictor(depth, lastPrice, entrySide === "ABAJO" ? "BUY" : "SELL", symbol.includes("USDT") ? 100 : 100);
   const cluster1d = computeVolumeCluster1D(c1d, entry, 120);
-  const heatmap = buildLiquidationHeatmap({ mtf, chartPrime: cp, supplyDemand: sd, lastPrice });
+  const heatmap = buildLiquidationHeatmap({ mtf, chartPrime: cp, supplyDemand: sd, lastPrice, dp: fmtDp });
 
   return {
     symbol, price: lastPrice,
@@ -763,7 +763,7 @@ function calculateATR(high, low, close, period) {
   return slice.reduce((a, b) => a + b, 0) / slice.length;
 }
 
-function buildLiquidationHeatmap({ mtf, chartPrime, supplyDemand, lastPrice }) {
+function buildLiquidationHeatmap({ mtf, chartPrime, supplyDemand, lastPrice, dp }) {
   const tfWeight = { "15m": 0.35, "1h": 0.55, "4h": 0.8, "1d": 1.0 };
   const points = [];
   const zones = [];
@@ -841,7 +841,7 @@ function buildLiquidationHeatmap({ mtf, chartPrime, supplyDemand, lastPrice }) {
   min -= pad;
   max += pad;
 
-  return { min, max, last: lastPrice, points, zones };
+  return { min, max, last: lastPrice, dp: typeof dp === "number" ? dp : 6, points, zones };
 }
 
 function clamp01(x) {
@@ -894,16 +894,25 @@ async function handleDashboard() {
         #funding, #oi, #oiChange, #obImb { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
         #sentimentBox { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
         .mtf-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-        .heatmap { height: 260px; border: 2px solid rgba(71,77,87,0.8); border-radius: 14px; background: linear-gradient(180deg, rgba(246,70,93,0.08) 0%, rgba(240,185,11,0.04) 50%, rgba(14,203,129,0.08) 100%); position: relative; overflow: hidden; }
-        .heat-band { position: absolute; left: 10px; right: 10px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.10); }
-        .heat-line { position: absolute; left: 10px; right: 10px; height: 3px; border-radius: 8px; }
-        .heat-last { position: absolute; left: 6px; right: 6px; height: 2px; background: rgba(255,255,255,0.9); box-shadow: 0 0 10px rgba(255,255,255,0.35); }
-        .heat-label { position: absolute; right: 12px; transform: translateY(-50%); font-size: clamp(0.68rem, 1.2vw, 0.82rem); font-weight: 900; color: rgba(255,255,255,0.95); text-shadow: 0 2px 10px rgba(0,0,0,0.8); pointer-events: none; padding: 2px 8px; border-radius: 999px; background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.10); max-width: calc(100% - 24px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .heat-legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 10px; font-size: 0.8rem; color: #d5d9e0; font-weight: 800; }
-        .pill { display:inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.12); }
-        .heat-list { margin-top: 10px; display: grid; grid-template-columns: 1fr; gap: 6px; }
-        .heat-item { display:flex; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.25); color: #fff; font-weight: 900; font-size: 0.95rem; }
-        .heat-item small { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; }
+        .heatmap { height: clamp(220px, 30vh, 320px); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; background: radial-gradient(1200px 400px at 50% 0%, rgba(246,70,93,0.10) 0%, rgba(0,0,0,0) 55%), radial-gradient(1200px 400px at 50% 100%, rgba(14,203,129,0.12) 0%, rgba(0,0,0,0) 55%), linear-gradient(180deg, rgba(246,70,93,0.06) 0%, rgba(240,185,11,0.04) 50%, rgba(14,203,129,0.06) 100%); position: relative; overflow: hidden; }
+        .heat-frame { position:absolute; inset: 10px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.20); box-shadow: inset 0 0 0 1px rgba(0,0,0,0.15); pointer-events:none; }
+        .heat-band { position: absolute; left: 12px; right: 12px; border-radius: 12px; border: 1px solid rgba(255,255,255,0.08); }
+        .heat-line { position: absolute; left: 12px; right: 12px; height: 3px; border-radius: 10px; }
+        .heat-last { position: absolute; left: 10px; right: 10px; height: 2px; background: rgba(255,255,255,0.95); box-shadow: 0 0 14px rgba(255,255,255,0.25); }
+        .heat-label { position: absolute; right: 16px; transform: translateY(-50%); font-size: clamp(0.70rem, 1.1vw, 0.85rem); font-weight: 900; color: rgba(255,255,255,0.98); text-shadow: 0 2px 12px rgba(0,0,0,0.85); pointer-events: none; padding: 4px 10px; border-radius: 999px; background: rgba(0,0,0,0.55); border: 1px solid rgba(255,255,255,0.10); max-width: calc(100% - 32px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .heat-label.left { right: auto; left: 16px; }
+        .heat-legend { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 10px; font-size: 0.82rem; color: #d5d9e0; font-weight: 800; }
+        .pill { display:flex; align-items:center; justify-content:center; padding: 6px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.18); }
+        .heat-list { margin-top: 12px; display: grid; grid-template-columns: 1fr; gap: 10px; }
+        .heat-item { display:flex; align-items:center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(0,0,0,0.22)); color: #fff; font-weight: 900; font-size: 1rem; }
+        .heat-left { display:flex; align-items:center; gap: 10px; min-width: 0; }
+        .tag { display:inline-flex; align-items:center; gap:6px; padding: 4px 10px; border-radius: 999px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.25); font-size: 0.80rem; color: #fff; }
+        .tag.tf { background: rgba(240,185,11,0.16); border-color: rgba(240,185,11,0.20); }
+        .tag.kind { background: rgba(255,255,255,0.06); }
+        .tag.side-demand { background: rgba(14,203,129,0.14); border-color: rgba(14,203,129,0.22); }
+        .tag.side-supply { background: rgba(246,70,93,0.14); border-color: rgba(246,70,93,0.22); }
+        .heat-price { font-weight: 950; font-size: 1.05rem; }
+        .heat-sub { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
         @media (max-width: 992px) {
           .card { padding: 18px; border-radius: 16px; }
@@ -1520,8 +1529,10 @@ async function handleDashboard() {
                 const y = (1 - t) * h;
                 return Math.max(0, Math.min(h, y));
             };
-            const fmt = (v) => Number(v).toLocaleString(undefined, { maximumFractionDigits: 6 });
+            const dp = (hm.dp != null && isFinite(hm.dp)) ? hm.dp : 6;
+            const fmt = (v) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: dp });
             const bands = [];
+            bands.push('<div class="heat-frame"></div>');
 
             const zones = Array.isArray(hm.zones) ? hm.zones : [];
             for (const z of zones) {
@@ -1547,7 +1558,7 @@ async function handleDashboard() {
 
             const yLast = toY(hm.last);
             bands.push('<div class="heat-last" style="top:' + yLast + 'px;"></div>');
-            bands.push('<div class="heat-label" style="top:' + yLast + 'px;right:12px;">LAST • ' + fmt(hm.last) + '</div>');
+            bands.push('<div class="heat-label left" style="top:' + yLast + 'px;">LAST • ' + fmt(hm.last) + '</div>');
 
             const showInlineLabels = w >= 420;
             if (showInlineLabels) {
@@ -1571,8 +1582,19 @@ async function handleDashboard() {
                     .slice(0, 6);
 
                 list.innerHTML = byStrength.map(p => {
-                    const tag = p.tf.toUpperCase() + ' ' + p.kind;
-                    return '<div class="heat-item"><div><div>' + tag + '</div><small>' + p.side + '</small></div><div class="mono">' + fmt(p.price) + '</div></div>';
+                    const sideClass = p.side === 'DEMAND' ? 'side-demand' : (p.side === 'SUPPLY' ? 'side-supply' : '');
+                    const sideText = p.side === 'DEMAND' ? 'DEMANDA' : (p.side === 'SUPPLY' ? 'OFERTA' : 'NEUTRAL');
+                    return '<div class="heat-item">'
+                      + '<div class="heat-left">'
+                      + '<span class="tag tf">' + p.tf.toUpperCase() + '</span>'
+                      + '<span class="tag kind">' + p.kind + '</span>'
+                      + '<span class="tag ' + sideClass + '">' + sideText + '</span>'
+                      + '</div>'
+                      + '<div style="text-align:right;min-width:120px;">'
+                      + '<div class="heat-price mono">' + fmt(p.price) + '</div>'
+                      + '<div class="heat-sub">Fuerza: ' + Math.round((p.strength || 0) * 100) + '%</div>'
+                      + '</div>'
+                      + '</div>';
                 }).join('');
             }
         }
