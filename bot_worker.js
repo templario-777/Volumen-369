@@ -890,7 +890,7 @@ async function handleDashboard() {
         .mtf-table { width: 100%; margin-top: 10px; font-size: 0.95rem; }
         .mtf-table td { padding: 10px 8px; border-bottom: 1px solid rgba(71, 77, 87, 0.6); color: #ffffff; }
         .mtf-tag { font-weight: 900; color: #fff; }
-        .mono { font-variant-numeric: tabular-nums; letter-spacing: 0.5px; color: #ffffff; }
+        .mono { font-variant-numeric: tabular-nums; letter-spacing: 0.3px; color: #ffffff; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; }
         #funding, #oi, #oiChange, #obImb { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
         #sentimentBox { color: #ffffff; font-weight: 900; font-size: 1.25rem; }
         .mtf-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
@@ -913,6 +913,12 @@ async function handleDashboard() {
         .tag.side-supply { background: rgba(246,70,93,0.14); border-color: rgba(246,70,93,0.22); }
         .heat-price { font-weight: 950; font-size: 1.05rem; }
         .heat-sub { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+        @media (min-width: 1200px) {
+          .heatmap { height: 360px; }
+          .heat-list { grid-template-columns: 1fr 1fr; }
+          .heat-price { font-size: 1.12rem; }
+        }
 
         @media (max-width: 992px) {
           .card { padding: 18px; border-radius: 16px; }
@@ -1530,7 +1536,7 @@ async function handleDashboard() {
                 return Math.max(0, Math.min(h, y));
             };
             const dp = (hm.dp != null && isFinite(hm.dp)) ? hm.dp : 6;
-            const fmt = (v) => Number(v).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: dp });
+            const fmt = (v) => Number(v).toLocaleString(undefined, { minimumFractionDigits: dp, maximumFractionDigits: dp });
             const bands = [];
             bands.push('<div class="heat-frame"></div>');
 
@@ -1576,12 +1582,24 @@ async function handleDashboard() {
             root.innerHTML = bands.join('');
 
             if (list) {
-                const byStrength = points
-                    .filter(p => p.kind === 'BPOC' || p.kind === 'POC' || p.kind === 'SPOC')
-                    .sort((a, b) => (b.strength || 0) - (a.strength || 0))
-                    .slice(0, 6);
+                const tfRank = { "1d": 0, "4h": 1, "1h": 2, "15m": 3 };
+                const kindRank = { "BPOC": 0, "POC": 1, "SPOC": 2 };
+                const maxItems = w >= 900 ? 12 : 6;
 
-                list.innerHTML = byStrength.map(p => {
+                const ordered = points
+                    .filter(p => p.kind === 'BPOC' || p.kind === 'POC' || p.kind === 'SPOC')
+                    .sort((a, b) => {
+                        const ta = tfRank[a.tf] != null ? tfRank[a.tf] : 9;
+                        const tb = tfRank[b.tf] != null ? tfRank[b.tf] : 9;
+                        if (ta !== tb) return ta - tb;
+                        const ka = kindRank[a.kind] != null ? kindRank[a.kind] : 9;
+                        const kb = kindRank[b.kind] != null ? kindRank[b.kind] : 9;
+                        if (ka !== kb) return ka - kb;
+                        return (b.strength || 0) - (a.strength || 0);
+                    })
+                    .slice(0, maxItems);
+
+                list.innerHTML = ordered.map(p => {
                     const sideClass = p.side === 'DEMAND' ? 'side-demand' : (p.side === 'SUPPLY' ? 'side-supply' : '');
                     const sideText = p.side === 'DEMAND' ? 'DEMANDA' : (p.side === 'SUPPLY' ? 'OFERTA' : 'NEUTRAL');
                     return '<div class="heat-item">'
