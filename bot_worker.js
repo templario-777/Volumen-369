@@ -921,6 +921,8 @@ async function handleDashboard() {
         .tag.side-supply { background: rgba(246,70,93,0.14); border-color: rgba(246,70,93,0.22); }
         .heat-price { font-weight: 950; font-size: 1.05rem; }
         .heat-sub { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .heat-list-title { display:flex; align-items:center; justify-content: space-between; gap: 10px; padding: 8px 10px; border-radius: 14px; border: 1px solid rgba(255,255,255,0.10); background: rgba(0,0,0,0.20); color: #fff; font-weight: 900; font-size: 0.92rem; }
+        .heat-list-title small { color: #d5d9e0; font-weight: 800; font-size: 0.78rem; }
 
         @media (min-width: 1200px) {
           .heatmap { height: 360px; }
@@ -1640,10 +1642,13 @@ async function handleDashboard() {
             if (list) {
                 const tfRank = { "1d": 0, "4h": 1, "1h": 2, "15m": 3 };
                 const kindRank = { "BPOC": 0, "POC": 1, "SPOC": 2 };
-                const maxItems = w >= 900 ? 12 : 6;
+                const maxItems = w >= 900 ? 12 : 10;
 
-                const ordered = points
+                const baseItems = points
                     .filter(p => p.kind === 'BPOC' || p.kind === 'POC' || p.kind === 'SPOC')
+                    .filter(p => p.price != null && isFinite(p.price));
+
+                const orderedDesktop = baseItems
                     .sort((a, b) => {
                         const ta = tfRank[a.tf] != null ? tfRank[a.tf] : 9;
                         const tb = tfRank[b.tf] != null ? tfRank[b.tf] : 9;
@@ -1655,6 +1660,18 @@ async function handleDashboard() {
                     })
                     .slice(0, maxItems);
 
+                const orderedMobile = baseItems
+                    .sort((a, b) => {
+                        if (b.price !== a.price) return b.price - a.price;
+                        const ta = tfRank[a.tf] != null ? tfRank[a.tf] : 9;
+                        const tb = tfRank[b.tf] != null ? tfRank[b.tf] : 9;
+                        if (ta !== tb) return ta - tb;
+                        const ka = kindRank[a.kind] != null ? kindRank[a.kind] : 9;
+                        const kb = kindRank[b.kind] != null ? kindRank[b.kind] : 9;
+                        return ka - kb;
+                    })
+                    .slice(0, maxItems);
+
                 const showTable = w >= 520;
                 if (showTable) {
                     try { list.classList.add('heat-table-mode'); } catch (e) {}
@@ -1663,7 +1680,7 @@ async function handleDashboard() {
                       + '<th>TF</th><th>NIVEL</th><th>LADO</th><th class="cell-right">PRECIO</th>'
                       + '</tr></thead>';
 
-                    for (const p of ordered) {
+                    for (const p of orderedDesktop) {
                         const sideText = p.side === 'DEMAND' ? 'DEMANDA' : (p.side === 'SUPPLY' ? 'OFERTA' : 'NEUTRAL');
                         const sideClass = p.side === 'DEMAND' ? 'side-demand' : (p.side === 'SUPPLY' ? 'side-supply' : '');
                         rows.push('<tr class="heat-row">'
@@ -1676,7 +1693,7 @@ async function handleDashboard() {
                     list.innerHTML = '<table class="heat-table">' + header + '<tbody>' + rows.join('') + '</tbody></table>';
                 } else {
                     try { list.classList.remove('heat-table-mode'); } catch (e) {}
-                    list.innerHTML = ordered.map(p => {
+                    const rows = orderedMobile.map(p => {
                         const sideClass = p.side === 'DEMAND' ? 'side-demand' : (p.side === 'SUPPLY' ? 'side-supply' : '');
                         const sideText = p.side === 'DEMAND' ? 'DEMANDA' : (p.side === 'SUPPLY' ? 'OFERTA' : 'NEUTRAL');
                         return '<div class="heat-item">'
@@ -1691,6 +1708,9 @@ async function handleDashboard() {
                           + '</div>'
                           + '</div>';
                     }).join('');
+
+                    const title = '<div class="heat-list-title"><div>NIVELES (ARRIBA → ABAJO)</div><small>Ordenados por precio</small></div>';
+                    list.innerHTML = title + rows;
                 }
             }
         }
