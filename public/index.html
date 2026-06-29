@@ -946,8 +946,8 @@
                 console.log('🔄 Actualizando precio para:', binanceSymbol);
                 document.getElementById('price-symbol').textContent = binanceSymbol;
                 
-                // Obtener precio y datos de 24h desde nuestro backend (evita CORS)
-                const tickerResponse = await fetch(`http://localhost:5000/api/ticker/${binanceSymbol}`);
+                // Obtener precio y datos de 24h desde nuestro backend de Cloudflare
+                const tickerResponse = await fetch(`https://backend1.d-perez9.workers.dev/api/ticker/${binanceSymbol}`);
                 
                 if (tickerResponse.ok) {
                     const tickerData = await tickerResponse.json();
@@ -987,7 +987,7 @@
 
         async function sendToAI(message, symbol) {
             try {
-                const response = await fetch('http://localhost:5000/api/chat', {
+                const response = await fetch('https://backend1.d-perez9.workers.dev/api/chat', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
@@ -1004,7 +1004,7 @@
                 
                 // Get current market price for entry
                 try {
-                    const tickerRes = await fetch(`http://localhost:5000/api/ticker/${symbol.replace('BINANCE:', '').replace('/', '')}`);
+                    const tickerRes = await fetch(`https://backend1.d-perez9.workers.dev/api/ticker/${symbol.replace('BINANCE:', '').replace('/', '')}`);
                     if (tickerRes.ok) {
                         const tickerData = await tickerRes.json();
                         lastMarketPrice = tickerData.lastPrice;
@@ -1015,7 +1015,7 @@
                 
                 addMessage(data.response, 'ai');
             } catch (error) {
-                addMessage('Error al conectar con el servidor. Asegúrate de que el backend esté corriendo en http://localhost:5000', 'ai');
+                addMessage('Error al conectar con el servidor de Cloudflare.', 'ai');
             }
         }
 
@@ -1068,7 +1068,7 @@
             resultsDiv.innerHTML = '<div class="screener-loading"><div class="screener-spinner"></div><p>Analizando el mercado... Esto puede tardar unos segundos.</p></div>';
 
             try {
-                const response = await fetch('http://localhost:5000/api/screener', {
+                const response = await fetch('https://backend1.d-perez9.workers.dev/api/screener', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({})
@@ -1081,7 +1081,7 @@
 
             } catch (error) {
                 console.error('❌ Error en screener:', error);
-                resultsDiv.innerHTML = `<div class="screener-empty"><p>Error al conectar con el servidor. Asegúrate de que el backend esté corriendo en http://localhost:5000</p></div>`;
+                resultsDiv.innerHTML = `<div class="screener-empty"><p>Error al conectar con el servidor de Cloudflare.</p></div>`;
             } finally {
                 btn.disabled = false;
                 btn.innerHTML = '<span>▶</span> Ejecutar Escáner';
@@ -1192,7 +1192,7 @@
 
         async function refreshMarketClimate() {
             try {
-                const response = await fetch('http://localhost:5000/api/market-climate');
+                const response = await fetch('https://backend1.d-perez9.workers.dev/api/market-climate');
                 const climate = await response.json();
                 
                 document.getElementById('climateBtcPrice').textContent = `$${climate.btc_price.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1225,7 +1225,7 @@
 
         async function refreshAuditLog() {
             try {
-                const response = await fetch('http://localhost:5000/api/audit/signals');
+                const response = await fetch('https://backend1.d-perez9.workers.dev/api/audit/signals');
                 const data = await response.json();
                 renderAuditLog(data.signals);
             } catch (e) {
@@ -1299,7 +1299,7 @@
 
         async function runAuditCheck() {
             try {
-                const response = await fetch('http://localhost:5000/api/audit/run', { method: 'POST' });
+                const response = await fetch('https://backend1.d-perez9.workers.dev/api/audit/run', { method: 'POST' });
                 const data = await response.json();
                 alert('✅ Auditoría ejecutada!');
                 refreshAuditLog();
@@ -1327,11 +1327,11 @@
                 // Get market climate
                 let climate = null;
                 try {
-                    const climateRes = await fetch('http://localhost:5000/api/market-climate');
+                    const climateRes = await fetch('https://backend1.d-perez9.workers.dev/api/market-climate');
                     climate = await climateRes.json();
                 } catch (e) {}
                 
-                const response = await fetch('http://localhost:5000/api/audit/signals', {
+                const response = await fetch('https://backend1.d-perez9.workers.dev/api/audit/signals', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
