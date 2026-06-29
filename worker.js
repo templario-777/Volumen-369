@@ -4,8 +4,11 @@ export default {
     const target = url.searchParams.get("target");
 
     if (!target) {
-      return new Response("Falta ?target=", { status: 400 });
+      return new Response("Falta ?target=https://api.binance.com (ejemplo)", { status: 400 });
     }
+
+    // Eliminar el parámetro target de la URL para no pasarle a Binance
+    url.searchParams.delete("target");
 
     const targetUrl = new URL(target);
     targetUrl.pathname = url.pathname;
@@ -21,6 +24,16 @@ export default {
       body: request.method === "GET" || request.method === "HEAD" ? undefined : request.body,
     };
 
-    return fetch(targetUrl.toString(), init);
+    const response = await fetch(targetUrl.toString(), init);
+    
+    // Crear una nueva respuesta para modificar headers
+    const newResponse = new Response(response.body, response);
+    
+    // Añadir headers CORS para que el frontend funcione
+    newResponse.headers.set('Access-Control-Allow-Origin', '*');
+    newResponse.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    newResponse.headers.set('Access-Control-Allow-Headers', '*');
+
+    return newResponse;
   },
 };
